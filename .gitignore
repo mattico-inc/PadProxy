@@ -6,6 +6,7 @@ firmware/.pioenvs/
 firmware/.piolibdeps/
 
 # Build artifacts
+firmware/build/
 *.o
 *.a
 *.elf
