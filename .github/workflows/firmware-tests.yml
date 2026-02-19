@@ -2,6 +2,7 @@ name: Firmware Tests
 
 on:
   push:
+    branches: [main]
     paths:
       - 'firmware/**'
   pull_request:
@@ -9,7 +10,8 @@ on:
       - 'firmware/**'
 
 jobs:
-  test:
+  unit-tests:
+    name: Unit Tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -17,3 +19,32 @@ jobs:
       - name: Build and run tests
         working-directory: firmware
         run: make test
+
+  build:
+    name: Build Firmware
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            firmware/.pio
+          key: pio-${{ hashFiles('firmware/platformio.ini', 'firmware/sdkconfig.defaults') }}
+          restore-keys: pio-
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Build ESP32-S3 firmware
+        working-directory: firmware
+        run: pio run -e esp32s3
