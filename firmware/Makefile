@@ -8,7 +8,7 @@ CFLAGS += -Iinclude -Itest/unity
 BUILD_DIR = build/test
 UNITY_SRC = test/unity/unity.c
 
-TEST_BINS = $(BUILD_DIR)/test_pc_power_state
+TEST_BINS = $(BUILD_DIR)/test_pc_power_state $(BUILD_DIR)/test_gamepad
 
 .PHONY: test clean
 
@@ -23,6 +23,9 @@ test: $(TEST_BINS)
 	@echo "=== All tests passed ==="
 
 $(BUILD_DIR)/test_pc_power_state: test/test_pc_power_state/test_pc_power_state.c src/pc_power_state.c $(UNITY_SRC) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -o $@ $^
+
+$(BUILD_DIR)/test_gamepad: test/test_gamepad/test_gamepad.c src/usb_hid_report.c $(UNITY_SRC) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -o $@ $^
 
 $(BUILD_DIR):

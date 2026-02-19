@@ -1,0 +1,187 @@
+#include <string.h>
+
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "esp_log.h"
+
+#include "gamepad.h"
+#include "bt_gamepad.h"
+#include "usb_hid_gamepad.h"
+#include "pc_power_state.h"
+#include "pc_power_hal.h"
+
+static const char *TAG = "padproxy";
+
+/* ── Shared state ────────────────────────────────────────────────────── */
+
+static pc_power_sm_t s_power_sm;
+
+/**
+ * Previous gamepad report, used to detect edges (e.g. guide button press).
+ * Sending the same unchanged report repeatedly is fine for USB HID, but
+ * we only want to fire a wake event on the *press* edge, not every poll.
+ */
+static gamepad_report_t s_prev_report;
+static bool s_prev_report_valid;
+
+/* ── Callbacks ───────────────────────────────────────────────────────── */
+
+/**
+ * USB state change → power state machine events.
+ */
+static void on_usb_state_change(usb_hid_state_t state)
+{
+    uint32_t now = pc_power_hal_millis();
+
+    switch (state) {
+    case USB_HID_MOUNTED:
+        ESP_LOGI(TAG, "USB mounted → PC_EVENT_USB_ENUMERATED");
+        pc_power_sm_process(&s_power_sm, PC_EVENT_USB_ENUMERATED, now);
+        break;
+    case USB_HID_SUSPENDED:
+    case USB_HID_NOT_MOUNTED:
+        ESP_LOGI(TAG, "USB suspended/unmounted → PC_EVENT_USB_SUSPENDED");
+        pc_power_sm_process(&s_power_sm, PC_EVENT_USB_SUSPENDED, now);
+        break;
+    }
+}
+
+/**
+ * Bluetooth gamepad connection events.
+ */
+static void on_bt_event(uint8_t idx, bt_gamepad_state_t state)
+{
+    if (state == BT_GAMEPAD_CONNECTED) {
+        ESP_LOGI(TAG, "Gamepad %d connected", idx);
+    } else {
+        ESP_LOGI(TAG, "Gamepad %d disconnected", idx);
+        s_prev_report_valid = false;
+    }
+}
+
+/* ── Hardware polling ────────────────────────────────────────────────── */
+
+static bool s_prev_button;
+static bool s_prev_led;
+
+/**
+ * Poll GPIO inputs and feed edge-triggered events into the power SM.
+ */
+static void poll_hardware(uint32_t now_ms)
+{
+    bool button = pc_power_hal_read_button();
+    bool led    = pc_power_hal_read_power_led();
+
+    /* Power button: rising edge = press */
+    if (button && !s_prev_button) {
+        ESP_LOGI(TAG, "Power button pressed");
+        pc_power_sm_process(&s_power_sm, PC_EVENT_BUTTON_PRESSED, now_ms);
+    }
+
+    /* Power LED edges */
+    if (led && !s_prev_led) {
+        pc_power_sm_process(&s_power_sm, PC_EVENT_POWER_LED_ON, now_ms);
+    } else if (!led && s_prev_led) {
+        pc_power_sm_process(&s_power_sm, PC_EVENT_POWER_LED_OFF, now_ms);
+    }
+
+    s_prev_button = button;
+    s_prev_led = led;
+}
+
+/* ── Action dispatch ─────────────────────────────────────────────────── */
+
+#define POWER_PULSE_MS      200
+#define BOOT_TIMEOUT_MS     30000
+
+/**
+ * Execute hardware actions requested by a power state machine transition.
+ */
+static void dispatch_actions(uint32_t actions)
+{
+    if (actions & PC_ACTION_TRIGGER_POWER) {
+        ESP_LOGI(TAG, "Triggering power button (%d ms)", POWER_PULSE_MS);
+        pc_power_hal_trigger_power_button(POWER_PULSE_MS);
+    }
+    if (actions & PC_ACTION_START_BOOT_TIMER) {
+        pc_power_hal_start_boot_timer(BOOT_TIMEOUT_MS);
+    }
+    if (actions & PC_ACTION_CANCEL_BOOT_TIMER) {
+        pc_power_hal_cancel_boot_timer();
+    }
+}
+
+/* ── Main loop ───────────────────────────────────────────────────────── */
+
+/**
+ * Process one gamepad report: check for wake triggers, forward to USB.
+ */
+static void process_gamepad(const gamepad_report_t *report, uint32_t now_ms)
+{
+    pc_power_state_t pc_state = pc_power_sm_get_state(&s_power_sm);
+
+    /*
+     * Wake-on-controller: fire WAKE_REQUESTED on the *rising edge* of
+     * the guide button when the PC is off or sleeping.
+     */
+    bool guide_now  = gamepad_report_guide_pressed(report);
+    bool guide_prev = s_prev_report_valid &&
+                      gamepad_report_guide_pressed(&s_prev_report);
+
+    if (guide_now && !guide_prev) {
+        if (pc_state == PC_STATE_OFF || pc_state == PC_STATE_SLEEPING) {
+            ESP_LOGI(TAG, "Guide button → wake request (PC %s)",
+                     pc_power_state_name(pc_state));
+            pc_power_result_t r = pc_power_sm_process(
+                &s_power_sm, PC_EVENT_WAKE_REQUESTED, now_ms);
+            dispatch_actions(r.actions);
+        }
+    }
+
+    /* Forward to USB only when the PC is on and USB is enumerated. */
+    if (pc_state == PC_STATE_ON) {
+        usb_hid_gamepad_send_report(report);
+    }
+
+    s_prev_report = *report;
+    s_prev_report_valid = true;
+}
+
+void app_main(void)
+{
+    ESP_LOGI(TAG, "PadProxy starting");
+
+    /* Initialize power management */
+    pc_power_hal_init();
+    pc_power_sm_init(&s_power_sm);
+    s_prev_button = pc_power_hal_read_button();
+    s_prev_led    = pc_power_hal_read_power_led();
+
+    /* Initialize USB HID gamepad (must be before BT so USB is ready) */
+    usb_hid_gamepad_init(on_usb_state_change);
+
+    /* Initialize Bluetooth gamepad */
+    bt_gamepad_init(on_bt_event);
+
+    ESP_LOGI(TAG, "Initialization complete, entering main loop");
+
+    /* Main loop: poll BT → proxy to USB, poll hardware → power SM */
+    for (;;) {
+        uint32_t now_ms = pc_power_hal_millis();
+
+        /* Service USB stack */
+        usb_hid_gamepad_task();
+
+        /* Poll hardware inputs (power button, LED) */
+        poll_hardware(now_ms);
+
+        /* Read BT gamepad and forward */
+        gamepad_report_t report;
+        if (bt_gamepad_get_report(0, &report)) {
+            process_gamepad(&report, now_ms);
+        }
+
+        /* ~1ms loop period for responsive input */
+        vTaskDelay(pdMS_TO_TICKS(1));
+    }
+}
