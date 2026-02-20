@@ -1,25 +1,24 @@
 #include "bt_gamepad.h"
 
 /*
- * Bluepad32 ESP-IDF integration.
+ * Bluepad32 Pico W integration.
  *
  * Bluepad32 uses a "platform" callback model: we register a uni_platform_t
  * and receive callbacks when controllers connect, disconnect, or send data.
- * Data arrives on Bluepad32's internal task, so we copy it under a spinlock
- * for the main loop to read safely.
+ * Data arrives on Bluepad32's internal task, so we copy it under a critical
+ * section for the main loop to read safely.
  */
 
 #include <string.h>
 #include <uni.h>
-#include "freertos/FreeRTOS.h"
-#include "freertos/portmacro.h"
+#include "pico/critical_section.h"
 
 /* ── Shared state ────────────────────────────────────────────────────── */
 
 static bt_gamepad_event_cb_t s_event_cb;
 static gamepad_report_t      s_reports[BT_GAMEPAD_MAX];
 static bool                  s_connected[BT_GAMEPAD_MAX];
-static portMUX_TYPE          s_lock = portMUX_INITIALIZER_UNLOCKED;
+static critical_section_t    s_lock;
 
 /* ── Helpers: Bluepad32 → gamepad_report_t conversion ────────────────── */
 
@@ -109,11 +108,11 @@ static void platform_on_device_disconnected(uni_hid_device_t *d)
      * Mark slot 0 as disconnected. With BT_GAMEPAD_MAX == 1 we only
      * track one controller.
      */
-    portENTER_CRITICAL(&s_lock);
+    critical_section_enter_blocking(&s_lock);
     s_connected[0] = false;
     memset(&s_reports[0], 0, sizeof(s_reports[0]));
     s_reports[0].dpad = GAMEPAD_DPAD_CENTERED;
-    portEXIT_CRITICAL(&s_lock);
+    critical_section_exit(&s_lock);
 
     if (s_event_cb) {
         s_event_cb(0, BT_GAMEPAD_DISCONNECTED);
@@ -127,9 +126,9 @@ static uni_error_t platform_on_device_ready(uni_hid_device_t *d)
 {
     (void)d;
 
-    portENTER_CRITICAL(&s_lock);
+    critical_section_enter_blocking(&s_lock);
     s_connected[0] = true;
-    portEXIT_CRITICAL(&s_lock);
+    critical_section_exit(&s_lock);
 
     if (s_event_cb) {
         s_event_cb(0, BT_GAMEPAD_CONNECTED);
@@ -152,9 +151,9 @@ static void platform_on_controller_data(uni_hid_device_t *d,
     gamepad_report_t report;
     convert_report(&ctl->gamepad, &report);
 
-    portENTER_CRITICAL(&s_lock);
+    critical_section_enter_blocking(&s_lock);
     s_reports[0] = report;
-    portEXIT_CRITICAL(&s_lock);
+    critical_section_exit(&s_lock);
 }
 
 static int32_t platform_get_property(uni_platform_property_t key)
@@ -191,6 +190,8 @@ void bt_gamepad_init(bt_gamepad_event_cb_t event_cb)
 {
     s_event_cb = event_cb;
 
+    critical_section_init(&s_lock);
+
     for (int i = 0; i < BT_GAMEPAD_MAX; i++) {
         s_connected[i] = false;
         memset(&s_reports[i], 0, sizeof(s_reports[i]));
@@ -207,9 +208,9 @@ bool bt_gamepad_is_connected(uint8_t idx)
         return false;
 
     bool connected;
-    portENTER_CRITICAL(&s_lock);
+    critical_section_enter_blocking(&s_lock);
     connected = s_connected[idx];
-    portEXIT_CRITICAL(&s_lock);
+    critical_section_exit(&s_lock);
     return connected;
 }
 
@@ -218,12 +219,12 @@ bool bt_gamepad_get_report(uint8_t idx, gamepad_report_t *report)
     if (idx >= BT_GAMEPAD_MAX)
         return false;
 
-    portENTER_CRITICAL(&s_lock);
+    critical_section_enter_blocking(&s_lock);
     bool connected = s_connected[idx];
     if (connected) {
         *report = s_reports[idx];
     }
-    portEXIT_CRITICAL(&s_lock);
+    critical_section_exit(&s_lock);
 
     return connected;
 }

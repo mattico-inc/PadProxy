@@ -1,12 +1,10 @@
 #include "usb_hid_gamepad.h"
 #include "usb_hid_report.h"
 
+#include <stdio.h>
 #include <string.h>
-#include "tinyusb.h"
+#include "tusb.h"
 #include "class/hid/hid_device.h"
-#include "esp_log.h"
-
-static const char *TAG = "usb_hid";
 
 /* ── State ───────────────────────────────────────────────────────────── */
 
@@ -142,7 +140,7 @@ void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id,
 
 void tud_mount_cb(void)
 {
-    ESP_LOGI(TAG, "USB mounted");
+    printf("[usb_hid] USB mounted\n");
     s_state = USB_HID_MOUNTED;
     if (s_state_cb) {
         s_state_cb(USB_HID_MOUNTED);
@@ -151,7 +149,7 @@ void tud_mount_cb(void)
 
 void tud_umount_cb(void)
 {
-    ESP_LOGI(TAG, "USB unmounted");
+    printf("[usb_hid] USB unmounted\n");
     s_state = USB_HID_NOT_MOUNTED;
     if (s_state_cb) {
         s_state_cb(USB_HID_NOT_MOUNTED);
@@ -161,7 +159,7 @@ void tud_umount_cb(void)
 void tud_suspend_cb(bool remote_wakeup_en)
 {
     (void)remote_wakeup_en;
-    ESP_LOGI(TAG, "USB suspended");
+    printf("[usb_hid] USB suspended\n");
     s_state = USB_HID_SUSPENDED;
     if (s_state_cb) {
         s_state_cb(USB_HID_SUSPENDED);
@@ -170,7 +168,7 @@ void tud_suspend_cb(bool remote_wakeup_en)
 
 void tud_resume_cb(void)
 {
-    ESP_LOGI(TAG, "USB resumed");
+    printf("[usb_hid] USB resumed\n");
     s_state = USB_HID_MOUNTED;
     if (s_state_cb) {
         s_state_cb(USB_HID_MOUNTED);
@@ -184,17 +182,8 @@ void usb_hid_gamepad_init(usb_hid_state_cb_t state_cb)
     s_state_cb = state_cb;
     s_state = USB_HID_NOT_MOUNTED;
 
-    const tinyusb_config_t tusb_cfg = {
-        .device_descriptor        = &desc_device,
-        .configuration_descriptor = desc_configuration,
-        .string_descriptor        = desc_strings,
-        .string_descriptor_count  =
-            sizeof(desc_strings) / sizeof(desc_strings[0]),
-        .external_phy             = false,
-    };
-
-    ESP_ERROR_CHECK(tinyusb_driver_install(&tusb_cfg));
-    ESP_LOGI(TAG, "USB HID gamepad initialized");
+    tusb_init();
+    printf("[usb_hid] USB HID gamepad initialized\n");
 }
 
 void usb_hid_gamepad_task(void)

@@ -1,5 +1,5 @@
 # Makefile for native (host) unit tests
-# For ESP32 firmware builds, use PlatformIO: pio run -e esp32s3
+# For Pico 2 W firmware builds, use CMake: mkdir build && cd build && cmake .. && make
 
 CC = gcc
 CFLAGS = -Wall -Wextra -Werror -std=c11 -g -O0

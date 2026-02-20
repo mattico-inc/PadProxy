@@ -12,7 +12,7 @@
  * status LED updates).
  *
  * States:
- *   PC_OFF      - PC is powered off (S5). ESP32 is on standby power.
+ *   PC_OFF      - PC is powered off (S5). MCU is on standby power.
  *   PC_BOOTING  - Power button was triggered, waiting for USB enumeration.
  *   PC_ON       - PC is running. USB enumerated, power LED active.
  *   PC_SLEEPING - PC entered sleep/hibernate (S3/S4). LED off, USB suspended.

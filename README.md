@@ -4,7 +4,7 @@ Open source hardware that manages PC power and gamepad connectivity for a consol
 
 ## What is PadProxy?
 
-PadProxy is an ESP32-based device that lives inside your PC case and provides seamless wireless gamepad connectivity. Simply press the home button on your controller and your PC wakes up, ready to play.
+PadProxy is a Raspberry Pi Pico 2 W based device that lives inside your PC case and provides seamless wireless gamepad connectivity. Simply press the home button on your controller and your PC wakes up, ready to play.
 
 ### Key Features
 
@@ -27,7 +27,7 @@ PadProxy is an ESP32-based device that lives inside your PC case and provides se
 
 ```
 PadProxy/
-├── firmware/     # ESP32 firmware (PlatformIO)
+├── firmware/     # RP2350 firmware (Pico SDK / CMake)
 ├── pcb/          # KiCad PCB design files
 ├── case/         # 3D printable enclosure
 ├── design/       # Logos, graphics, renders
@@ -36,9 +36,8 @@ PadProxy/
 
 ## Hardware Requirements
 
-- ESP32-S3 (for USB OTG support)
-- USB-C connection to PC
-- External antenna (2.4GHz WiFi/BT)
+- Raspberry Pi Pico 2 W (RP2350 with CYW43439 wireless)
+- USB connection to PC
 - Connection to PC power button header
 
 ## Getting Started
