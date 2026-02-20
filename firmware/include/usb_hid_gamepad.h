@@ -7,8 +7,8 @@
 /**
  * USB HID Gamepad Device
  *
- * Presents the ESP32-S3 as a USB HID gamepad to the host PC using TinyUSB.
- * The native USB-OTG peripheral connects directly to one port on the
+ * Presents the Pico 2 W as a USB HID gamepad to the host PC using TinyUSB.
+ * The native USB peripheral connects directly to one port on the
  * motherboard's internal USB header for low-latency input.
  *
  * USB state transitions feed into the PC power state machine:
@@ -32,7 +32,7 @@ typedef void (*usb_hid_state_cb_t)(usb_hid_state_t state);
  * Initialize the USB HID gamepad device.
  *
  * Configures the TinyUSB stack with our gamepad HID descriptor and
- * installs the USB driver on the ESP32-S3 native USB peripheral.
+ * installs the USB driver on the RP2350 native USB peripheral.
  *
  * @param state_cb  Callback for mount/suspend/resume events (may be NULL).
  */

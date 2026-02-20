@@ -1,16 +1,14 @@
+#include <stdio.h>
 #include <string.h>
 
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "esp_log.h"
+#include "pico/stdlib.h"
+#include "pico/time.h"
 
 #include "gamepad.h"
 #include "bt_gamepad.h"
 #include "usb_hid_gamepad.h"
 #include "pc_power_state.h"
 #include "pc_power_hal.h"
-
-static const char *TAG = "padproxy";
 
 /* ── Shared state ────────────────────────────────────────────────────── */
 
@@ -35,12 +33,12 @@ static void on_usb_state_change(usb_hid_state_t state)
 
     switch (state) {
     case USB_HID_MOUNTED:
-        ESP_LOGI(TAG, "USB mounted → PC_EVENT_USB_ENUMERATED");
+        printf("[padproxy] USB mounted -> PC_EVENT_USB_ENUMERATED\n");
         pc_power_sm_process(&s_power_sm, PC_EVENT_USB_ENUMERATED, now);
         break;
     case USB_HID_SUSPENDED:
     case USB_HID_NOT_MOUNTED:
-        ESP_LOGI(TAG, "USB suspended/unmounted → PC_EVENT_USB_SUSPENDED");
+        printf("[padproxy] USB suspended/unmounted -> PC_EVENT_USB_SUSPENDED\n");
         pc_power_sm_process(&s_power_sm, PC_EVENT_USB_SUSPENDED, now);
         break;
     }
@@ -52,9 +50,9 @@ static void on_usb_state_change(usb_hid_state_t state)
 static void on_bt_event(uint8_t idx, bt_gamepad_state_t state)
 {
     if (state == BT_GAMEPAD_CONNECTED) {
-        ESP_LOGI(TAG, "Gamepad %d connected", idx);
+        printf("[padproxy] Gamepad %d connected\n", idx);
     } else {
-        ESP_LOGI(TAG, "Gamepad %d disconnected", idx);
+        printf("[padproxy] Gamepad %d disconnected\n", idx);
         s_prev_report_valid = false;
     }
 }
@@ -74,7 +72,7 @@ static void poll_hardware(uint32_t now_ms)
 
     /* Power button: rising edge = press */
     if (button && !s_prev_button) {
-        ESP_LOGI(TAG, "Power button pressed");
+        printf("[padproxy] Power button pressed\n");
         pc_power_sm_process(&s_power_sm, PC_EVENT_BUTTON_PRESSED, now_ms);
     }
 
@@ -100,7 +98,7 @@ static void poll_hardware(uint32_t now_ms)
 static void dispatch_actions(uint32_t actions)
 {
     if (actions & PC_ACTION_TRIGGER_POWER) {
-        ESP_LOGI(TAG, "Triggering power button (%d ms)", POWER_PULSE_MS);
+        printf("[padproxy] Triggering power button (%d ms)\n", POWER_PULSE_MS);
         pc_power_hal_trigger_power_button(POWER_PULSE_MS);
     }
     if (actions & PC_ACTION_START_BOOT_TIMER) {
@@ -130,7 +128,7 @@ static void process_gamepad(const gamepad_report_t *report, uint32_t now_ms)
 
     if (guide_now && !guide_prev) {
         if (pc_state == PC_STATE_OFF || pc_state == PC_STATE_SLEEPING) {
-            ESP_LOGI(TAG, "Guide button → wake request (PC %s)",
+            printf("[padproxy] Guide button -> wake request (PC %s)\n",
                      pc_power_state_name(pc_state));
             pc_power_result_t r = pc_power_sm_process(
                 &s_power_sm, PC_EVENT_WAKE_REQUESTED, now_ms);
@@ -147,9 +145,10 @@ static void process_gamepad(const gamepad_report_t *report, uint32_t now_ms)
     s_prev_report_valid = true;
 }
 
-void app_main(void)
+int main(void)
 {
-    ESP_LOGI(TAG, "PadProxy starting");
+    stdio_init_all();
+    printf("[padproxy] PadProxy starting\n");
 
     /* Initialize power management */
     pc_power_hal_init();
@@ -163,7 +162,7 @@ void app_main(void)
     /* Initialize Bluetooth gamepad */
     bt_gamepad_init(on_bt_event);
 
-    ESP_LOGI(TAG, "Initialization complete, entering main loop");
+    printf("[padproxy] Initialization complete, entering main loop\n");
 
     /* Main loop: poll BT → proxy to USB, poll hardware → power SM */
     for (;;) {
@@ -182,6 +181,6 @@ void app_main(void)
         }
 
         /* ~1ms loop period for responsive input */
-        vTaskDelay(pdMS_TO_TICKS(1));
+        sleep_ms(1);
     }
 }
