@@ -25,26 +25,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
+      - name: Install ARM toolchain
+        run: sudo apt-get update && sudo apt-get install -y gcc-arm-none-eabi libnewlib-arm-none-eabi cmake
 
-      - name: Cache PlatformIO
+      - name: Cache Pico SDK
         uses: actions/cache@v4
         with:
-          path: |
-            ~/.platformio
-            firmware/.pio
-          key: pio-${{ hashFiles('firmware/platformio.ini', 'firmware/sdkconfig.defaults') }}
-          restore-keys: pio-
+          path: firmware/build/_deps/pico_sdk-src
+          key: pico-sdk-${{ hashFiles('firmware/pico_sdk_import.cmake') }}
+          restore-keys: pico-sdk-
 
-      - name: Install PlatformIO
-        run: pip install platformio
+      - name: Clone Bluepad32
+        run: git clone --depth 1 https://gitlab.com/ricardoquesada/bluepad32.git firmware/lib/bluepad32
 
-      - name: Build ESP32-S3 firmware
+      - name: Build Pico 2 W firmware
         working-directory: firmware
-        run: pio run -e esp32s3
+        run: |
+          mkdir -p build && cd build
+          cmake -DPICO_BOARD=pico2_w -DPICO_SDK_FETCH_FROM_GIT=ON ..
+          make -j$(nproc)
