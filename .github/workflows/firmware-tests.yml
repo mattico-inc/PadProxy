@@ -25,26 +25,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
+      - name: Install ARM toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-none-eabi libnewlib-arm-none-eabi
 
-      - name: Cache PlatformIO
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.platformio
-            firmware/.pio
-          key: pio-${{ hashFiles('firmware/platformio.ini', 'firmware/sdkconfig.defaults') }}
-          restore-keys: pio-
+      - name: Clone Bluepad32
+        run: git clone https://gitlab.com/ricardoquesada/bluepad32.git firmware/lib/bluepad32
 
-      - name: Install PlatformIO
-        run: pip install platformio
-
-      - name: Build ESP32-S3 firmware
+      - name: Configure CMake
         working-directory: firmware
-        run: pio run -e esp32s3
+        run: cmake -B build -DPICO_BOARD=pico2_w -DPICO_SDK_FETCH_FROM_GIT=ON
+
+      - name: Build firmware
+        working-directory: firmware
+        run: cmake --build build -j$(nproc)
