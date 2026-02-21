@@ -14,9 +14,11 @@ Wake your PC with your gamepad. PadProxy bridges Bluetooth controllers to USB an
 
 ### Wake. Connect. Play.
 
-Tired of walking across the room to press your PC's power button before you can game from the couch? PadProxy fixes that.
+On a console, you press the button on the controller and you're gaming. On PC? Get up from the couch. Walk across the room. Press the power button. Walk back. Sit down. Pick up the controller. Wait for Bluetooth to pair. Hope it actually connects this time.
 
-**PadProxy** is a tiny device that mounts inside your PC case. It connects to your Bluetooth gamepad wirelessly and appears to your PC as a standard wired USB controller. When your PC is off or sleeping, just press the home button on your controller -- PadProxy wakes the PC and you're gaming in seconds.
+Nothing existed to fix this, so we built PadProxy.
+
+**PadProxy** is a tiny open-source device that mounts inside your PC case. It connects to your Bluetooth gamepad wirelessly and appears to your PC as a standard wired USB controller. When your PC is off or sleeping, just press the home button on your controller -- PadProxy wakes the PC and you're gaming in seconds. Console-level convenience on your gaming PC.
 
 ### How It Works
 
@@ -37,11 +39,11 @@ Tired of walking across the room to press your PC's power button before you can 
 
 ### Key Features
 
-- **PC Wake:** Press the home button to wake your PC from off or sleep
+- **PC Wake:** Press the home button to wake your PC from off or sleep -- the thing that should have existed years ago
 - **Zero Drivers:** Appears as a standard USB HID gamepad -- works out of the box on Windows, Linux, macOS
-- **Bluetooth to USB Bridge:** Reliable, low-latency controller input
+- **Bluetooth to USB Bridge:** Reliable, low-latency controller input without the pairing headaches
 - **Internal Mount:** Sits inside your PC case, out of sight
-- **Open Source:** Full source code and hardware design files on GitHub (MIT + CERN-OHL-P-2.0)
+- **Fully Open Source:** Hardware design files, firmware, enclosure -- everything is on GitHub (MIT + CERN-OHL-P-2.0). Build your own or contribute improvements.
 - **Based on Raspberry Pi Pico 2 W:** Well-documented, hackable platform
 
 ### What's in the Box
@@ -79,19 +81,21 @@ Detailed setup guide with photos available on GitHub. Installation takes about 1
 
 ### Open Source
 
-PadProxy is fully open source:
+PadProxy is fully open source. You don't have to buy one -- everything you need to build your own is in the repo:
 - **Firmware:** MIT License -- [GitHub link]
 - **Hardware:** CERN Open Hardware Licence v2 (Permissive) -- [GitHub link]
 - KiCad schematic and PCB files included
 - 3D printable enclosure files (STL + source) included
 - Contributions welcome!
 
+We sell assembled units and kits for anyone who'd rather not source parts and solder. Pricing covers components and assembly -- this is a passion project, not a business.
+
 ---
 
 ## Listing Metadata
 
 **Category:** Electronics > Microcontrollers
-**Tags:** raspberry pi, pico, gamepad, controller, bluetooth, usb, hid, pc gaming, wake on lan, open source hardware
+**Tags:** raspberry pi, pico, gamepad, controller, bluetooth, usb, hid, pc gaming, couch gaming, open source hardware
 
 ## Pricing
 
@@ -99,6 +103,8 @@ PadProxy is fully open source:
 |-----|-------|---------------|--------------------------|
 | Assembled | $42 | $5 | $12 |
 | Kit (no Pico) | $22 | $4 | $9 |
+
+Pricing covers BOM + fabrication + assembly + Tindie's cut. The design files are free on GitHub for anyone who wants to DIY the whole thing.
 
 ## Photos Needed (in order of importance)
 

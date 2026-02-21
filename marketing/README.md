@@ -1,23 +1,19 @@
 # Marketing
 
-Plans and draft copy for PadProxy's indie launch.
+Plans and draft copy for getting PadProxy into the hands of people who want it.
+
+## The Short Version
+
+Couch gaming on PC is broken -- there's no way to wake your PC from a wireless controller the way consoles do. PadProxy fixes that, and nothing else like it exists. The goal isn't to make money; it's to make this thing available to the people who've been wanting it. Tindie sales cover component costs so the project sustains itself. The design files are always free on GitHub.
 
 ## Contents
 
 | File | Description |
 |------|-------------|
-| [strategy.md](strategy.md) | Overall marketing strategy: positioning, channels, tactics, pricing, timeline |
-| [launch-checklist.md](launch-checklist.md) | Ordered checklist from "working prototype" to "listed and selling" |
+| [strategy.md](strategy.md) | Overall strategy: why this exists, channels, outreach, pricing, timeline |
+| [launch-checklist.md](launch-checklist.md) | Ordered checklist from "working prototype" to "available on Tindie" |
 | [tindie-listing.md](tindie-listing.md) | Draft Tindie listing copy, pricing, and photo shot list |
 | [launch-posts.md](launch-posts.md) | Ready-to-adapt drafts for Reddit (multiple subreddits) and Hacker News |
-
-## Quick Summary
-
-**Strategy:** Sell on Tindie first, market through Reddit/HN/YouTube. No Kickstarter, no marketing agency, no paid ads. Start scrappy, iterate based on real sales.
-
-**Pricing:** $42 assembled, $22 kit (no Pico included).
-
-**Launch order:** r/raspberry_pi (soft launch) > r/pcgaming + r/htpc (broad) > Hacker News > YouTube reviewers.
 
 ## Assets Needed Before Launch
 
