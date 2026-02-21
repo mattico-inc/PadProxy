@@ -60,4 +60,12 @@ void pc_power_hal_start_boot_timer(uint32_t timeout_ms);
  */
 void pc_power_hal_cancel_boot_timer(void);
 
+/**
+ * Check if the boot timer has expired since the last call.
+ *
+ * Returns true exactly once per expiration, then resets.  The main loop
+ * polls this and feeds PC_EVENT_BOOT_TIMEOUT into the state machine.
+ */
+bool pc_power_hal_boot_timer_expired(void);
+
 #endif /* PC_POWER_HAL_H */

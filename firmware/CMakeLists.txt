@@ -1,6 +1,10 @@
 # PadProxy firmware — Raspberry Pi Pico 2 W (RP2350 + CYW43439)
 #
-# Build:
+# Quick build (from firmware/):
+#   make firmware          # auto-fetches Pico SDK & Bluepad32
+#   make flash             # copy UF2 to Pico in BOOTSEL mode
+#
+# Manual cmake build:
 #   mkdir build && cd build
 #   cmake -DPICO_BOARD=pico2_w ..
 #   make -j$(nproc)
@@ -8,8 +12,10 @@
 # The resulting padproxy.uf2 can be dragged onto the Pico 2 W in BOOTSEL mode.
 #
 # Prerequisites:
-#   - Pico SDK 2.0+: set PICO_SDK_PATH or PICO_SDK_FETCH_FROM_GIT=ON
-#   - Bluepad32:     git clone https://gitlab.com/ricardoquesada/bluepad32.git lib/bluepad32
+#   - ARM toolchain:  arm-none-eabi-gcc (apt: gcc-arm-none-eabi)
+#   - Pico SDK 2.0+:  set PICO_SDK_PATH or let the Makefile fetch it via git
+#   - Bluepad32:      auto-cloned by `make firmware`, or clone manually:
+#                      git clone https://gitlab.com/ricardoquesada/bluepad32.git lib/bluepad32
 
 cmake_minimum_required(VERSION 3.13)
 
@@ -37,6 +43,7 @@ add_executable(padproxy
     src/usb_hid_gamepad.c
     src/usb_hid_report.c
     src/pc_power_state.c
+    src/pc_power_hal.c
 )
 
 target_include_directories(padproxy PRIVATE include src)

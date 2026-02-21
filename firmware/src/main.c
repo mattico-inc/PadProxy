@@ -22,6 +22,28 @@ static pc_power_sm_t s_power_sm;
 static gamepad_report_t s_prev_report;
 static bool s_prev_report_valid;
 
+/* ── Action dispatch ─────────────────────────────────────────────────── */
+
+#define POWER_PULSE_MS      200
+#define BOOT_TIMEOUT_MS     30000
+
+/**
+ * Execute hardware actions requested by a power state machine transition.
+ */
+static void dispatch_actions(uint32_t actions)
+{
+    if (actions & PC_ACTION_TRIGGER_POWER) {
+        printf("[padproxy] Triggering power button (%d ms)\n", POWER_PULSE_MS);
+        pc_power_hal_trigger_power_button(POWER_PULSE_MS);
+    }
+    if (actions & PC_ACTION_START_BOOT_TIMER) {
+        pc_power_hal_start_boot_timer(BOOT_TIMEOUT_MS);
+    }
+    if (actions & PC_ACTION_CANCEL_BOOT_TIMER) {
+        pc_power_hal_cancel_boot_timer();
+    }
+}
+
 /* ── Callbacks ───────────────────────────────────────────────────────── */
 
 /**
@@ -30,16 +52,19 @@ static bool s_prev_report_valid;
 static void on_usb_state_change(usb_hid_state_t state)
 {
     uint32_t now = pc_power_hal_millis();
+    pc_power_result_t r;
 
     switch (state) {
     case USB_HID_MOUNTED:
         printf("[padproxy] USB mounted -> PC_EVENT_USB_ENUMERATED\n");
-        pc_power_sm_process(&s_power_sm, PC_EVENT_USB_ENUMERATED, now);
+        r = pc_power_sm_process(&s_power_sm, PC_EVENT_USB_ENUMERATED, now);
+        dispatch_actions(r.actions);
         break;
     case USB_HID_SUSPENDED:
     case USB_HID_NOT_MOUNTED:
         printf("[padproxy] USB suspended/unmounted -> PC_EVENT_USB_SUSPENDED\n");
-        pc_power_sm_process(&s_power_sm, PC_EVENT_USB_SUSPENDED, now);
+        r = pc_power_sm_process(&s_power_sm, PC_EVENT_USB_SUSPENDED, now);
+        dispatch_actions(r.actions);
         break;
     }
 }
@@ -63,50 +88,38 @@ static bool s_prev_button;
 static bool s_prev_led;
 
 /**
- * Poll GPIO inputs and feed edge-triggered events into the power SM.
+ * Poll GPIO inputs and timers, feed edge-triggered events into the power SM.
  */
 static void poll_hardware(uint32_t now_ms)
 {
     bool button = pc_power_hal_read_button();
     bool led    = pc_power_hal_read_power_led();
+    pc_power_result_t r;
 
     /* Power button: rising edge = press */
     if (button && !s_prev_button) {
         printf("[padproxy] Power button pressed\n");
-        pc_power_sm_process(&s_power_sm, PC_EVENT_BUTTON_PRESSED, now_ms);
+        r = pc_power_sm_process(&s_power_sm, PC_EVENT_BUTTON_PRESSED, now_ms);
+        dispatch_actions(r.actions);
     }
 
     /* Power LED edges */
     if (led && !s_prev_led) {
-        pc_power_sm_process(&s_power_sm, PC_EVENT_POWER_LED_ON, now_ms);
+        r = pc_power_sm_process(&s_power_sm, PC_EVENT_POWER_LED_ON, now_ms);
+        dispatch_actions(r.actions);
     } else if (!led && s_prev_led) {
-        pc_power_sm_process(&s_power_sm, PC_EVENT_POWER_LED_OFF, now_ms);
+        r = pc_power_sm_process(&s_power_sm, PC_EVENT_POWER_LED_OFF, now_ms);
+        dispatch_actions(r.actions);
+    }
+
+    /* Boot timer expiry */
+    if (pc_power_hal_boot_timer_expired()) {
+        r = pc_power_sm_process(&s_power_sm, PC_EVENT_BOOT_TIMEOUT, now_ms);
+        dispatch_actions(r.actions);
     }
 
     s_prev_button = button;
     s_prev_led = led;
-}
-
-/* ── Action dispatch ─────────────────────────────────────────────────── */
-
-#define POWER_PULSE_MS      200
-#define BOOT_TIMEOUT_MS     30000
-
-/**
- * Execute hardware actions requested by a power state machine transition.
- */
-static void dispatch_actions(uint32_t actions)
-{
-    if (actions & PC_ACTION_TRIGGER_POWER) {
-        printf("[padproxy] Triggering power button (%d ms)\n", POWER_PULSE_MS);
-        pc_power_hal_trigger_power_button(POWER_PULSE_MS);
-    }
-    if (actions & PC_ACTION_START_BOOT_TIMER) {
-        pc_power_hal_start_boot_timer(BOOT_TIMEOUT_MS);
-    }
-    if (actions & PC_ACTION_CANCEL_BOOT_TIMER) {
-        pc_power_hal_cancel_boot_timer();
-    }
 }
 
 /* ── Main loop ───────────────────────────────────────────────────────── */
@@ -171,7 +184,7 @@ int main(void)
         /* Service USB stack */
         usb_hid_gamepad_task();
 
-        /* Poll hardware inputs (power button, LED) */
+        /* Poll hardware inputs (power button, LED, boot timer) */
         poll_hardware(now_ms);
 
         /* Read BT gamepad and forward */

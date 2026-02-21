@@ -14,8 +14,8 @@ PadProxy/
 │   ├── src/           # Source files
 │   ├── include/       # Public headers
 │   ├── test/          # Native unit tests (Unity framework)
-│   ├── CMakeLists.txt # Pico SDK build (cross-compile for RP2350)
-│   ├── Makefile       # Host-native unit test build
+│   ├── CMakeLists.txt # Pico SDK cmake config (cross-compile for RP2350)
+│   ├── Makefile       # Top-level build: firmware + unit tests
 │   └── pico_sdk_import.cmake
 ├── pcb/               # KiCad PCB design files
 ├── case/              # 3D printable enclosure (FreeCAD/STL)
@@ -39,17 +39,29 @@ This compiles and runs all test binaries under `firmware/build/test/`. The test 
 
 ### Firmware Build (cross-compile for RP2350)
 
-Requires Pico SDK 2.0+ and Bluepad32:
+Requires `arm-none-eabi-gcc` (the ARM cross-compiler). Pico SDK and Bluepad32 are fetched automatically:
 
 ```bash
-cd firmware
-git clone https://gitlab.com/ricardoquesada/bluepad32.git lib/bluepad32
-mkdir build && cd build
-cmake -DPICO_BOARD=pico2_w ..
-make -j$(nproc)
+cd firmware && make firmware
 ```
 
-Output: `firmware/build/padproxy.uf2` (drag onto Pico 2 W in BOOTSEL mode).
+If you have the Pico SDK installed locally, set `PICO_SDK_PATH` to skip the git fetch:
+
+```bash
+PICO_SDK_PATH=~/pico-sdk make firmware
+```
+
+Output: `firmware/build/firmware/padproxy.uf2`
+
+### Flashing
+
+Hold BOOTSEL on the Pico 2 W, plug in USB, then:
+
+```bash
+cd firmware && make flash
+```
+
+Or manually: drag `padproxy.uf2` onto the mounted `RP2350` / `RPI-RP2` drive.
 
 ### CI
 
@@ -71,7 +83,7 @@ The firmware follows a layered architecture with clear separation between hardwa
 | **USB HID report** | `src/usb_hid_report.c`, `include/usb_hid_report.h` | HID report descriptor, wire-format conversion (pure logic) |
 | **Gamepad common** | `include/gamepad.h` | Canonical `gamepad_report_t` struct, button/dpad definitions |
 | **PC power state machine** | `src/pc_power_state.c`, `include/pc_power_state.h` | Pure-logic state machine (OFF/BOOTING/ON/SLEEPING) |
-| **PC power HAL** | `include/pc_power_hal.h` | Hardware abstraction (GPIO, timers); mocked in tests |
+| **PC power HAL** | `src/pc_power_hal.c`, `include/pc_power_hal.h` | RP2350 GPIO/timer implementation; interface mocked in tests |
 | **TinyUSB config** | `src/tusb_config.h` | USB device class configuration (HID only) |
 
 ### Data Flow
@@ -89,7 +101,7 @@ The state machine in `pc_power_state.c` is a pure-logic module with no hardware 
 - **Events:** Button presses, USB enumeration/suspension, power LED changes, boot timeout
 - **Actions (bitmask):** `PC_ACTION_TRIGGER_POWER`, `PC_ACTION_START_BOOT_TIMER`, `PC_ACTION_CANCEL_BOOT_TIMER`
 
-The HAL (`pc_power_hal.h`) is an interface with no implementation in the repo -- it's implemented per-target (RP2350 hardware or test mocks).
+The HAL (`pc_power_hal.h` / `pc_power_hal.c`) abstracts GPIO and timer hardware. The RP2350 implementation uses Pico SDK alarm APIs for non-blocking power button pulses and boot timeouts. Tests exercise the state machine directly without needing the HAL.
 
 ### Thread Safety
 
