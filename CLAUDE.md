@@ -39,13 +39,13 @@ This compiles and runs all test binaries under `firmware/build/test/`. The test 
 
 ### Firmware Build (cross-compile for RP2350)
 
-Requires `arm-none-eabi-gcc` (the ARM cross-compiler). Pico SDK and Bluepad32 are fetched automatically:
+Requires `arm-none-eabi-gcc` (the ARM cross-compiler). Pico SDK and Bluepad32 are cloned automatically on first build:
 
 ```bash
 cd firmware && make firmware
 ```
 
-If you have the Pico SDK installed locally, set `PICO_SDK_PATH` to skip the git fetch:
+Dependencies are cloned to `firmware/lib/` (gitignored). To clone them separately: `make deps`. If you have the Pico SDK installed elsewhere, override with `PICO_SDK_PATH`:
 
 ```bash
 PICO_SDK_PATH=~/pico-sdk make firmware
