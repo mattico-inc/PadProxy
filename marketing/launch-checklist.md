@@ -1,6 +1,6 @@
 # PadProxy Launch Checklist
 
-A concrete, ordered checklist for going from "working prototype" to "listed and selling."
+A concrete, ordered checklist for going from "working prototype" to "available for anyone who wants one."
 
 ## Stage 1: Hardware Ready
 
@@ -74,10 +74,9 @@ A concrete, ordered checklist for going from "working prototype" to "listed and 
 
 ## Stage 7: Ongoing
 
-- [ ] Track weekly sales and page views
-- [ ] Respond to Tindie reviews (every single one)
+- [ ] Respond to Tindie reviews and questions (every single one)
 - [ ] Update compatibility list as users report new controllers
 - [ ] Iterate on enclosure design based on feedback
-- [ ] Consider kit vs. assembled ratio -- adjust inventory accordingly
+- [ ] Adjust kit vs. assembled inventory based on what people actually want
 - [ ] Reorder PCBs before stock runs out (lead time: 1-2 weeks from JLCPCB)
-- [ ] Evaluate whether own store is worth setting up (threshold: ~20 units/month)
+- [ ] Keep GitHub issues and contributions healthy -- this is open source first
