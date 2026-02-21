@@ -55,7 +55,7 @@ Output: `firmware/build/padproxy.uf2` (drag onto Pico 2 W in BOOTSEL mode).
 
 GitHub Actions runs on pushes to `main` and PRs touching `firmware/**`:
 - **Unit Tests:** `make test` in `firmware/`
-- **Build Firmware:** PlatformIO build (legacy ESP32-S3 target in CI config)
+- **Build Firmware:** CMake cross-compile for RP2350 (Pico 2 W)
 
 ## Architecture
 
