@@ -4,10 +4,12 @@
 #   make firmware  - Cross-compile for RP2350 (output: build/firmware/padproxy.uf2)
 #   make test      - Build and run host-native unit tests
 #   make flash     - Copy UF2 to Pico 2 W in BOOTSEL mode
-#   make clean     - Remove all build artifacts
+#   make deps      - Clone Pico SDK and Bluepad32 into lib/
+#   make clean     - Remove build artifacts (keeps lib/)
+#   make distclean - Remove build artifacts and cloned dependencies
 #
 # Variables:
-#   PICO_SDK_PATH  - Path to Pico SDK (fetched from git if unset)
+#   PICO_SDK_PATH  - Path to Pico SDK (default: lib/pico-sdk)
 #   PICO_MOUNT     - Mount point of Pico in BOOTSEL mode (auto-detected)
 
 # ── Tooling ──────────────────────────────────────────────────────────────
@@ -22,35 +24,50 @@ TEST_BUILD_DIR = build/test
 FW_BUILD_DIR   = build/firmware
 UNITY_SRC      = test/unity/unity.c
 
+# ── Dependencies ─────────────────────────────────────────────────────────
+
+PICO_SDK_TAG   ?= 2.1.0
+BLUEPAD32_DIR   = lib/bluepad32
+PICO_SDK_DIR    = lib/pico-sdk
+
+# Use PICO_SDK_PATH if set by the user, otherwise clone to lib/pico-sdk
+PICO_SDK_PATH  ?= $(PICO_SDK_DIR)
+
 # ── Test binaries ────────────────────────────────────────────────────────
 
 TEST_BINS = $(TEST_BUILD_DIR)/test_pc_power_state $(TEST_BUILD_DIR)/test_gamepad
 
 # ── Firmware cmake arguments ─────────────────────────────────────────────
 
-CMAKE_ARGS = -DPICO_BOARD=pico2_w
-ifndef PICO_SDK_PATH
-    CMAKE_ARGS += -DPICO_SDK_FETCH_FROM_GIT=ON
-endif
+CMAKE_ARGS  = -DPICO_BOARD=pico2_w
+CMAKE_ARGS += -DPICO_SDK_PATH=$(abspath $(PICO_SDK_PATH))
 
 # Auto-detect Pico mount point for flashing
 PICO_MOUNT ?= $(firstword $(wildcard /media/$(USER)/RP2350 /media/$(USER)/RPI-RP2 /run/media/$(USER)/RP2350 /run/media/$(USER)/RPI-RP2 /Volumes/RP2350 /Volumes/RPI-RP2))
 
 # ── Phony targets ────────────────────────────────────────────────────────
 
-.PHONY: all firmware test flash clean
+.PHONY: all firmware test flash deps clean distclean
 
 all: firmware
 
+# ── Dependencies ─────────────────────────────────────────────────────────
+
+deps: $(BLUEPAD32_DIR) $(PICO_SDK_DIR)
+
+$(BLUEPAD32_DIR):
+	git clone https://gitlab.com/ricardoquesada/bluepad32.git $(BLUEPAD32_DIR)
+
+$(PICO_SDK_DIR):
+	git clone --branch $(PICO_SDK_TAG) --depth 1 https://github.com/raspberrypi/pico-sdk.git $(PICO_SDK_DIR)
+	cd $(PICO_SDK_DIR) && git submodule update --init
+
 # ── Firmware (cross-compile for RP2350) ──────────────────────────────────
 
-firmware: lib/bluepad32 | $(FW_BUILD_DIR)
+firmware: $(BLUEPAD32_DIR) $(PICO_SDK_PATH) | $(FW_BUILD_DIR)
 	cd $(FW_BUILD_DIR) && cmake $(CMAKE_ARGS) ../..
 	$(MAKE) -C $(FW_BUILD_DIR) -j$(shell nproc)
 	@echo "=== Firmware built: $(FW_BUILD_DIR)/padproxy.uf2 ==="
-
-lib/bluepad32:
-	git clone https://gitlab.com/ricardoquesada/bluepad32.git lib/bluepad32
 
 $(FW_BUILD_DIR):
 	mkdir -p $(FW_BUILD_DIR)
@@ -92,3 +109,6 @@ $(TEST_BUILD_DIR):
 
 clean:
 	rm -rf build/
+
+distclean: clean
+	rm -rf lib/

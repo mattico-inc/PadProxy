@@ -4,17 +4,17 @@
 #   make firmware          # auto-fetches Pico SDK & Bluepad32
 #   make flash             # copy UF2 to Pico in BOOTSEL mode
 #
-# Manual cmake build:
+# Manual cmake build (set PICO_SDK_PATH first):
 #   mkdir build && cd build
-#   cmake -DPICO_BOARD=pico2_w ..
+#   cmake -DPICO_BOARD=pico2_w -DPICO_SDK_PATH=/path/to/pico-sdk ..
 #   make -j$(nproc)
 #
 # The resulting padproxy.uf2 can be dragged onto the Pico 2 W in BOOTSEL mode.
 #
 # Prerequisites:
 #   - ARM toolchain:  arm-none-eabi-gcc (apt: gcc-arm-none-eabi)
-#   - Pico SDK 2.0+:  set PICO_SDK_PATH or let the Makefile fetch it via git
-#   - Bluepad32:      auto-cloned by `make firmware`, or clone manually:
+#   - Pico SDK 2.0+:  set PICO_SDK_PATH, or `make deps` to clone to lib/
+#   - Bluepad32:      auto-cloned by `make deps`/`make firmware`, or:
 #                      git clone https://gitlab.com/ricardoquesada/bluepad32.git lib/bluepad32
 
 cmake_minimum_required(VERSION 3.13)

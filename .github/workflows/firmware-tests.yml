@@ -31,13 +31,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-arm-none-eabi libnewlib-arm-none-eabi
 
-      - name: Clone Bluepad32
-        run: git clone https://gitlab.com/ricardoquesada/bluepad32.git firmware/lib/bluepad32
-
-      - name: Configure CMake
-        working-directory: firmware
-        run: cmake -B build -DPICO_BOARD=pico2_w -DPICO_SDK_FETCH_FROM_GIT=ON
-
       - name: Build firmware
         working-directory: firmware
-        run: cmake --build build -j$(nproc)
+        run: make firmware
