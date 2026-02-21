@@ -42,11 +42,11 @@ PadProxy supports multiple power input options for maximum compatibility:
 
 | Component | Typical | Peak |
 |-----------|---------|------|
-| ESP32-S3 (active, BT+WiFi) | 100mA | 350mA |
-| ESP32-S3 (light sleep, BT listening) | 2-5mA | - |
+| Pico 2 W (active, BT) | 50mA | 150mA |
+| Pico 2 W (dormant, BT listening) | 5-10mA | - |
 | FE1.1s USB Hub | 20mA | 50mA |
 | Status LEDs | 5mA | 20mA |
-| **Total (active)** | **~125mA** | **~420mA** |
+| **Total (active)** | **~75mA** | **~220mA** |
 | **Total (standby)** | **~25mA** | - |
 
 USB standby power typically provides 500mA-2A depending on motherboard, which is sufficient.
@@ -57,16 +57,17 @@ USB standby power typically provides 500mA-2A depending on motherboard, which is
                          ┌─────────────────────────────────┐
                          │         Power Management        │
                          │                                 │
-USB 2.0 Header ─── 5V ──►│──┬──► 3.3V LDO ──► ESP32-S3   │
-(Primary)                │  │                              │
-                         │  └──► 5V Rail ──► USB Hub      │
+USB 2.0 Header ─── 5V ──►│──┬──► VSYS ──► Pico 2 W        │
+(Primary)                │  │    (onboard 3.3V regulator)  │
+                         │  │                              │
+                         │  └──► 5V Rail ──► USB Hub       │
                          │         │                       │
-5VSB Tap (Optional) ────►│────────┘ (diode OR)            │
+5VSB Tap (Optional) ────►│────────┘ (diode OR)             │
                          │                                 │
                          └─────────────────────────────────┘
 ```
 
-**Note:** Simple diode OR configuration allows either source to power the device. When both present, higher voltage source wins (minimal difference in practice).
+**Note:** Simple diode OR configuration allows either source to power the device. When both present, higher voltage source wins (minimal difference in practice). The Pico 2 W has an onboard buck-boost regulator (RT6154) that generates 3.3V from VSYS, so no external LDO is needed.
 
 ---
 
@@ -74,7 +75,7 @@ USB 2.0 Header ─── 5V ──►│──┬──► 3.3V LDO ──► ES
 
 ### Design Rationale
 
-The ESP32-S3 connects **directly** to the motherboard USB port for optimal HID performance. The USB hub is a separate convenience feature that doesn't affect gamepad functionality.
+The Pico 2 W connects **directly** to the motherboard USB port for optimal HID performance. The USB hub is a separate convenience feature that doesn't affect gamepad functionality.
 
 **Key principle:** Hub issues should never break gamepad functionality.
 
@@ -83,7 +84,7 @@ The ESP32-S3 connects **directly** to the motherboard USB port for optimal HID p
 ```
 Motherboard USB 2.0 Header (9-pin)
             │
-            ├── Port 1 ──────────────► ESP32-S3 USB OTG
+            ├── Port 1 ──────────────► Pico 2 W USB Device
             │                          (TinyUSB HID Device)
             │                          - Gamepad emulation
             │                          - Latency critical
@@ -98,7 +99,7 @@ Motherboard USB 2.0 Header (9-pin)
 
 | Connection | Source | Destination | Purpose |
 |------------|--------|-------------|---------|
-| Motherboard Port 1 | 9-pin header | ESP32-S3 | Gamepad HID (direct) |
+| Motherboard Port 1 | 9-pin header | Pico 2 W | Gamepad HID (direct) |
 | Motherboard Port 2 | 9-pin header | FE1.1s upstream | Hub connection |
 | Hub Downstream 1 | FE1.1s | 9-pin OUT header | User device passthrough |
 | Hub Downstream 2 | FE1.1s | 9-pin OUT header | User device passthrough |
@@ -108,14 +109,14 @@ Motherboard USB 2.0 Header (9-pin)
 ### USB Enumeration Behavior
 
 **When PC boots:**
-1. ESP32-S3 enumerates as USB HID Gamepad
+1. Pico 2 W enumerates as USB HID Gamepad
 2. FE1.1s enumerates as USB Hub
 3. Downstream devices enumerate through hub
 
 **When PC is off (standby power):**
-1. ESP32-S3 remains powered, no USB host activity
+1. Pico 2 W remains powered, no USB host activity
 2. Hub remains powered but idle
-3. ESP32 monitors for USB host connection to detect PC wake
+3. Pico 2 W monitors for USB host connection to detect PC wake
 
 ---
 
@@ -182,7 +183,7 @@ acting as a true analog switch regardless of which direction current flows.
 
 ```
                     ┌──────────────────┐
-ESP32 GPIO ──[330Ω]──►│ LED     MOSFET  │
+Pico GPIO ──[330Ω]──►│ LED     MOSFET  │
                     │                  │
 GND ─────────────────►│       (bidir)  │
                     └───┬──────────┬───┘
@@ -194,7 +195,7 @@ GND ─────────────────►│       (bidir)  │
 - GPIO HIGH -> LED illuminates -> MOSFET turns on -> PWR_BTN pins shorted
 - GPIO LOW -> MOSFET off -> PWR_BTN pins open (normal state)
 - Pulse duration: 100-500ms (configurable in firmware)
-- Complete optical isolation protects ESP32 from motherboard
+- Complete optical isolation protects Pico 2 W from motherboard
 - **Polarity agnostic:** MOSFET conducts in both directions when on, exactly like
   a mechanical switch. Works regardless of which pin the motherboard pulls high.
 
@@ -238,7 +239,7 @@ Mobo PWR_BTN_A ──┬──────│──►D1──┬───[470Ω
                  │       │      │            │             │
                  │       │      │◄──[LED-]───│◄────────────│
                  │       │      │            │             │
-Mobo PWR_BTN_B ──┬──────│──►D3──┘           │  Phototrans │──► ESP32 GPIO
+Mobo PWR_BTN_B ──┬──────│──►D3──┘           │  Phototrans │──► Pico GPIO
                  │       │                   │  (output)   │     (input, pull-up)
                  │       │  D2, D4 complete  │             │
                  │       │  the bridge       └─────────────┘
@@ -263,7 +264,7 @@ Mobo Pin B ──┴────────────────────
 
 
 PC817 Output (phototransistor):
-  VCC ──[10kΩ]──┬──► ESP32 GPIO (PWR_BTN_SENSE)
+  VCC ──[10kΩ]──┬──► Pico GPIO (PWR_BTN_SENSE)
                 │
            [collector]
                 │
@@ -295,15 +296,15 @@ tight for reliable operation. Schottky diodes (BAT54, BAT43, SS14) drop only ~0.
 The power LED header has a defined polarity from the motherboard, so the user is
 expected to connect +/- correctly (clearly marked on the PCB silkscreen).
 
-**IMPORTANT: 5V Tolerance.** The ESP32-S3 GPIOs are NOT 5V tolerant (absolute max
-is VDD+0.3V = 3.9V). Motherboard LED headers can output 5V. A **3.3V Zener diode
+**IMPORTANT: 5V Tolerance.** The RP2350 GPIOs are NOT 5V tolerant (absolute max
+is 3.63V). Motherboard LED headers can output 5V. A **3.3V Zener diode
 clamp** (BZX84C3V3) protects the GPIO while allowing correct sensing at both 3.3V
 and 5V motherboard voltages.
 
 ```
 PWR_LED+ ─────┬─────────────────────► To Case LED (optional)
               │
-              └────[10kΩ]──┬─────────► ESP32 GPIO (PWR_LED_SENSE, input)
+              └────[10kΩ]──┬─────────► Pico GPIO (PWR_LED_SENSE, input)
                            │
                        [3.3V Zener]   (BZX84C3V3 - clamps to 3.3V if input >3.3V)
                            │
@@ -383,7 +384,7 @@ by the Zener and the input resistor).
 **Trigger:** Controller HOME/Guide/PS button pressed
 
 **Sequence:**
-1. ESP32 receives button press via Bluetooth
+1. Pico 2 W receives button press via Bluetooth
 2. Check current PC state (should be OFF or SLEEPING)
 3. Pulse optocoupler GPIO HIGH for 200ms
 4. Motherboard receives "power button press"
@@ -401,7 +402,7 @@ by the Zener and the input resistor).
 **Trigger:** Controller button press (configurable)
 
 **Sequence:**
-1. ESP32 receives button press via Bluetooth
+1. Pico 2 W receives button press via Bluetooth
 2. Construct WoL magic packet (6x 0xFF + 16x MAC address)
 3. Send UDP broadcast on port 9
 4. NIC receives packet and signals motherboard
@@ -410,7 +411,7 @@ by the Zener and the input resistor).
 **Requirements:**
 - WoL enabled in BIOS
 - WoL enabled in OS network adapter settings
-- ESP32 connected to same network/VLAN
+- Pico 2 W connected to same network/VLAN
 - Only works from S3 (sleep) or S4 (hibernate) on most systems
 
 **Advantages:**
@@ -447,10 +448,10 @@ PadProxy supports multiple connection configurations:
 Motherboard          9-pin        PadProxy         9-pin         User's
 USB 2.0 Header ════► cable ════► 9-pin IN         OUT ════════► Front Panel
                                      │                          USB / AIO / etc
-                                     ├── Port 1 → ESP32
+                                     ├── Port 1 → Pico 2 W
                                      └── Port 2 → Hub → USB_OUT
 
-Features: ESP32 direct connection + Hub passthrough
+Features: Pico 2 W direct connection + Hub passthrough
 ```
 
 #### Mode B: Rear USB with Adapter Cable
@@ -461,10 +462,10 @@ For systems where internal USB headers are fully occupied:
 Rear USB          USB-A to       PadProxy         9-pin         User's
 Port        ════► 9-pin cable ══► 9-pin IN         OUT ════════► Devices
                                      │
-                                     ├── Port 1 → ESP32
+                                     ├── Port 1 → Pico 2 W
                                      └── Port 2 → Hub → USB_OUT
 
-Features: ESP32 direct connection + Hub passthrough
+Features: Pico 2 W direct connection + Hub passthrough
 Requires: USB-A male to 9-pin female adapter cable
 ```
 
@@ -476,9 +477,9 @@ For development, testing, or minimal installations:
 Any USB           USB-C          PadProxy
 Port        ════► cable    ════► USB-C port
                                      │
-                                     └── ESP32 only
+                                     └── Pico 2 W only
 
-Features: ESP32/gamepad functionality only
+Features: Gamepad functionality only
 Limitation: Hub passthrough NOT available (only 1 USB port)
 ```
 
@@ -504,7 +505,7 @@ Pin 6 → │5V │D- │D+ │GND│NC │ ← Pin 10
         └───┴───┴───┴───┴───┘
          P1  P1  P1  P1     P2  P2  P2  P2
 
-P1 = USB Port 1 (D-/D+ directly to ESP32)
+P1 = USB Port 1 (D-/D+ directly to Pico 2 W)
 P2 = USB Port 2 (D-/D+ to Hub upstream)
 5V = Shared power rail
 KEY = Blocked pin for keying
@@ -532,13 +533,12 @@ Standard ATX front panel header:
 
 | Component | Part Number | Package | Purpose | Est. Cost |
 |-----------|-------------|---------|---------|-----------|
-| MCU | ESP32-S3-WROOM-1 | Module | Main controller | $3.50 |
+| MCU | Raspberry Pi Pico 2 W | Module | Main controller (RP2350 + CYW43439 BT/WiFi) | $7.00 |
 | USB Hub | FE1.1s | SSOP-28 | USB port expansion | $0.50 |
 | Photo-MOSFET Optocoupler | TLP222A (or AQY212 / CPC1017N) | DIP-4/SOP-4 | Power button trigger (polarity-agnostic) | $0.60 |
 | Optocoupler (sense) | PC817 | DIP-4/SMD | Power button sense (with bridge rectifier) | $0.10 |
 | Schottky diodes | BAT54S (dual) or 4x BAT54 | SOT-23 / SOD-323 | Bridge rectifier for sense circuit | $0.15 |
 | Zener diode | BZX84C3V3 | SOT-23 | 5V clamp for LED sense GPIO | $0.02 |
-| LDO | AMS1117-3.3 | SOT-223 | 3.3V regulation | $0.10 |
 | Crystal | 12MHz | HC49/SMD | Hub clock | $0.15 |
 | Photo-MOSFET Optocoupler | TLP222A | DIP-4/SOP-4 | *Optional:* Reset button trigger | $0.60 |
 
@@ -551,14 +551,14 @@ Standard ATX front panel header:
 | PC817 optocoupler | PC817 | 1 | Sense - detects physical button press |
 | Schottky diodes | BAT54 | 4 (or 2x BAT54S dual) | Bridge rectifier for sense polarity agnosticism |
 | Resistor | 470Ω | 1 | Current limit for sense optocoupler LED |
-| Resistor | 10kΩ | 1 | Pull-up for sense optocoupler output to ESP32 GPIO |
+| Resistor | 10kΩ | 1 | Pull-up for sense optocoupler output to Pico GPIO |
 
 ### Power LED Sense Components
 
 | Component | Value | Qty | Purpose |
 |-----------|-------|-----|---------|
 | Resistor | 10kΩ | 1 | Current limit / sense resistor for LED signal |
-| Zener diode | BZX84C3V3 (3.3V) | 1 | Clamp to protect ESP32 GPIO from 5V motherboard output |
+| Zener diode | BZX84C3V3 (3.3V) | 1 | Clamp to protect Pico GPIO from 5V motherboard output |
 
 ### Optional: Reset Button Trigger Components
 
@@ -593,7 +593,6 @@ on builds that don't need remote reset capability.
 | USB 2.0 Header (M) | Generic 9-pin | Output to user devices | $0.30 |
 | USB-C Receptacle | Generic 16-pin | Alt connection | $0.40 |
 | 2.54mm Pin Headers | Generic | Front panel connections (default) | $0.20 |
-| U.FL Connector | Generic | External antenna | $0.30 |
 | Screw Terminals | 2-pos 2.54mm pitch | *Optional:* Front panel alt (not populated by default) | $0.40 |
 
 ### Front Panel Connector Design
@@ -614,45 +613,44 @@ per signal pair.
 
 | Category | Cost | Notes |
 |----------|------|-------|
-| Active components | ~$5.50 | MCU, hub, optocouplers, LDO |
-| Passive components | ~$0.65 | Resistors, caps, crystal, Zener |
-| Connectors | ~$1.50 | USB headers, USB-C, pin headers, U.FL |
+| Active components | ~$8.50 | MCU, hub, optocouplers |
+| Passive components | ~$0.50 | Resistors, caps, crystal, Zener |
+| Connectors | ~$1.20 | USB headers, USB-C, pin headers |
 | PCB (qty 5) | ~$2.00 each | |
-| **Total per unit (base)** | **~$9.65** | Without optional reset trigger |
-| **Total per unit (full)** | **~$10.25** | With optional reset trigger |
+| **Total per unit (base)** | **~$12.20** | Without optional reset trigger |
+| **Total per unit (full)** | **~$12.80** | With optional reset trigger |
 
 ---
 
 ## GPIO Assignments
 
-### ESP32-S3 Pin Allocation
+### Pico 2 W Pin Allocation
 
 | GPIO | Function | Direction | Notes |
 |------|----------|-----------|-------|
-| 19 | USB_D- | Bidir | USB OTG Data- |
-| 20 | USB_D+ | Bidir | USB OTG Data+ |
-| 1 | PWR_BTN_SENSE | Input | Detect physical button press (PC817 output, active HIGH = pressed, pull-up) |
-| 2 | PWR_BTN_TRIGGER | Output | Photo-MOSFET optocoupler drive (TLP222A LED) |
-| 3 | PWR_LED_SENSE | Input | Detect PC power state (Zener-clamped for 5V tolerance) |
-| 4 | STATUS_LED_R | Output | RGB status - Red |
-| 5 | STATUS_LED_G | Output | RGB status - Green |
-| 6 | STATUS_LED_B | Output | RGB status - Blue |
-| 7 | I2C_SDA | Bidir | Optional OLED display |
-| 8 | I2C_SCL | Output | Optional OLED display |
-| 9 | RST_BTN_TRIGGER | Output | Optional: Photo-MOSFET optocoupler drive for reset (TLP222A LED) |
-| 38 | BOOT_BTN | Input | Factory reset / pairing mode |
-| EN | RESET | Input | Hardware reset |
+| 2 | PWR_BTN_SENSE | Input | Detect physical button press (PC817 output, active HIGH = pressed, pull-up) |
+| 3 | PWR_BTN_TRIGGER | Output | Photo-MOSFET optocoupler drive (TLP222A LED) |
+| 4 | PWR_LED_SENSE | Input | Detect PC power state (Zener-clamped for 5V tolerance) |
+| 5 | STATUS_LED_R | Output | RGB status - Red |
+| 6 | STATUS_LED_G | Output | RGB status - Green |
+| 7 | STATUS_LED_B | Output | RGB status - Blue |
+| 8 | I2C_SDA | Bidir | Optional OLED display |
+| 9 | I2C_SCL | Output | Optional OLED display |
+| 10 | RST_BTN_TRIGGER | Output | Optional: Photo-MOSFET optocoupler drive for reset (TLP222A LED) |
 
-**Reserved for antenna:**
-- ESP32-S3-WROOM-1 uses internal antenna or U.FL connector variant
+**USB:** Handled by the Pico 2 W module internally. USB D+/D- are routed from the
+module's castellated pads (or test points TP1/TP3) to the carrier PCB.
+
+**Bluetooth:** Handled by the CYW43439 wireless module onboard the Pico 2 W. Uses
+the onboard PCB antenna — no external antenna connector needed.
 
 ### Notes on GPIO Selection
 
-1. **GPIOs 19, 20** - Dedicated USB pins on ESP32-S3, cannot be reassigned
-2. **GPIOs 1-6** - General purpose, suitable for digital I/O
-3. **GPIO 38** - Has internal pull-up, good for buttons
-4. **Avoid GPIO 0** - Boot mode selection, keep floating or high
-5. **Avoid GPIO 45, 46** - Strapping pins on some variants
+1. **GPIO 2-4** - Front panel interface (sense and trigger), matching firmware definitions
+2. **GPIO 5-7** - Status LEDs, adjacent pins for clean routing
+3. **GPIO 8-9** - Hardware I2C0 (SDA/SCL) for optional OLED
+4. **GPIO 10** - Optional reset trigger, near other front panel GPIOs
+5. **Avoid GPIO 0, 1** - Reserved for UART TX/RX (debug output)
 
 ---
 
@@ -667,9 +665,9 @@ per signal pair.
 
 ### Thermal
 
-- ESP32-S3 may need thermal relief if sustained WiFi+BT use
+- Pico 2 W generates minimal heat in typical operation (~50mA)
 - FE1.1s generates minimal heat
-- No special cooling required for typical use
+- No special cooling required
 
 ### ESD Protection
 
@@ -680,9 +678,9 @@ per signal pair.
 
 ### Mechanical
 
-- PCB sized for internal mounting (max ~60x40mm)
+- PCB sized for internal mounting
 - Mounting holes for M3 screws or standoffs
-- Antenna connector near board edge for external routing
+- Pico 2 W module can be castellated-soldered or socketed with pin headers
 
 ---
 
@@ -702,7 +700,7 @@ Reverse connection causes no damage but disables sensing.
 second TLP222A photo-MOSFET optocoupler and 330Ω resistor for reset trigger
 capability. These components are **not populated by default** to save ~$0.61.
 Users who want remote reset (e.g., watchdog recovery) can solder them on.
-GPIO 9 is reserved for this function.
+GPIO 10 is reserved for this function.
 
 ### D3: Front Panel Connector Format (RESOLVED)
 
@@ -721,12 +719,12 @@ offer jumper selection between 3.3V and 5V.
 **Impact on design:**
 - **Button sense circuit (bridge + optocoupler):** Works at both 3.3V and 5V.
   At 3.3V: ~3.2mA through optocoupler LED (above PC817 minimum). At 5V: ~6.8mA.
-  The optocoupler provides complete isolation, so 5V never reaches the ESP32.
+  The optocoupler provides complete isolation, so 5V never reaches the Pico 2 W.
 - **Button trigger circuit (photo-MOSFET):** Load side is completely isolated from
-  the ESP32. Works at any voltage up to the TLP222A's 60V rating.
+  the Pico 2 W. Works at any voltage up to the TLP222A's 60V rating.
 - **LED sense circuit:** 5V motherboard output clamped to 3.3V by Zener diode.
-  ESP32 GPIO protected.
-- **ESP32-S3 is NOT 5V tolerant** (absolute max VDD+0.3V = 3.9V). All GPIO inputs
+  Pico GPIO protected.
+- **RP2350 is NOT 5V tolerant** (absolute max 3.63V). All GPIO inputs
   from motherboard signals are now protected either by optocoupler isolation or
   Zener clamping.
 
@@ -755,3 +753,4 @@ for now due to wide availability and DIP-4 hand-soldering friendliness.
 | 0.1 | 2026-02-02 | Initial design document |
 | 0.2 | 2026-02-06 | Revised to polarity-agnostic design: photo-MOSFET optocoupler for trigger, Schottky bridge + PC817 for sense. Added open design questions. Updated BOM. |
 | 0.3 | 2026-02-07 | Added 5V tolerance protection (Zener clamp on LED sense). Added optional reset trigger circuit (DNP). Dual-footprint connectors (headers + screw terminals). Resolved design questions D1-D4. Updated BOM and GPIO table. |
+| 0.4 | 2026-02-21 | Migrated from ESP32-S3-WROOM-1 to Raspberry Pi Pico 2 W (RP2350). Removed external LDO and antenna connector. Updated GPIO assignments, power budget, BOM, and all circuit descriptions. |

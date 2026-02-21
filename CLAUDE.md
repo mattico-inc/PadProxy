@@ -67,7 +67,7 @@ Or manually: drag `padproxy.uf2` onto the mounted `RP2350` / `RPI-RP2` drive.
 
 GitHub Actions runs on pushes to `main` and PRs touching `firmware/**`:
 - **Unit Tests:** `make test` in `firmware/`
-- **Build Firmware:** PlatformIO build (legacy ESP32-S3 target in CI config)
+- **Build Firmware:** CMake cross-compile for RP2350 (Pico 2 W)
 
 ## Architecture
 
