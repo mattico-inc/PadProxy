@@ -32,19 +32,18 @@ static uint16_t map_buttons(uint32_t bp_buttons, uint32_t bp_misc)
 {
     uint16_t out = 0;
 
-    if (bp_buttons & UNI_GAMEPAD_BUTTON_A)          out |= GAMEPAD_BTN_A;
-    if (bp_buttons & UNI_GAMEPAD_BUTTON_B)          out |= GAMEPAD_BTN_B;
-    if (bp_buttons & UNI_GAMEPAD_BUTTON_X)          out |= GAMEPAD_BTN_X;
-    if (bp_buttons & UNI_GAMEPAD_BUTTON_Y)          out |= GAMEPAD_BTN_Y;
-    if (bp_buttons & UNI_GAMEPAD_BUTTON_SHOULDER_L) out |= GAMEPAD_BTN_L1;
-    if (bp_buttons & UNI_GAMEPAD_BUTTON_SHOULDER_R) out |= GAMEPAD_BTN_R1;
-    if (bp_buttons & UNI_GAMEPAD_BUTTON_THUMB_L)    out |= GAMEPAD_BTN_L3;
-    if (bp_buttons & UNI_GAMEPAD_BUTTON_THUMB_R)    out |= GAMEPAD_BTN_R3;
+    if (bp_buttons & BUTTON_A)          out |= GAMEPAD_BTN_A;
+    if (bp_buttons & BUTTON_B)          out |= GAMEPAD_BTN_B;
+    if (bp_buttons & BUTTON_X)          out |= GAMEPAD_BTN_X;
+    if (bp_buttons & BUTTON_Y)          out |= GAMEPAD_BTN_Y;
+    if (bp_buttons & BUTTON_SHOULDER_L) out |= GAMEPAD_BTN_L1;
+    if (bp_buttons & BUTTON_SHOULDER_R) out |= GAMEPAD_BTN_R1;
+    if (bp_buttons & BUTTON_THUMB_L)    out |= GAMEPAD_BTN_L3;
+    if (bp_buttons & BUTTON_THUMB_R)    out |= GAMEPAD_BTN_R3;
 
-    if (bp_misc & UNI_GAMEPAD_MISC_BUTTON_START)    out |= GAMEPAD_BTN_START;
-    if (bp_misc & UNI_GAMEPAD_MISC_BUTTON_SELECT)   out |= GAMEPAD_BTN_SELECT;
-    if (bp_misc & UNI_GAMEPAD_MISC_BUTTON_SYSTEM)   out |= GAMEPAD_BTN_GUIDE;
-    if (bp_misc & UNI_GAMEPAD_MISC_BUTTON_HOME)     out |= GAMEPAD_BTN_GUIDE;
+    if (bp_misc & MISC_BUTTON_START)    out |= GAMEPAD_BTN_START;
+    if (bp_misc & MISC_BUTTON_SELECT)   out |= GAMEPAD_BTN_SELECT;
+    if (bp_misc & MISC_BUTTON_SYSTEM)   out |= GAMEPAD_BTN_GUIDE;
 
     return out;
 }
@@ -93,7 +92,7 @@ static void platform_init(int argc, const char **argv)
 
 static void platform_on_init_complete(void)
 {
-    uni_bt_enable_new_connections_unsafe(true);
+    uni_bt_start_scanning_and_autoconnect_unsafe();
 }
 
 static void platform_on_device_connected(uni_hid_device_t *d)
@@ -119,7 +118,7 @@ static void platform_on_device_disconnected(uni_hid_device_t *d)
     }
 
     /* Re-enable scanning so another controller can connect. */
-    uni_bt_enable_new_connections_unsafe(true);
+    uni_bt_start_scanning_and_autoconnect_unsafe();
 }
 
 static uni_error_t platform_on_device_ready(uni_hid_device_t *d)
@@ -135,7 +134,7 @@ static uni_error_t platform_on_device_ready(uni_hid_device_t *d)
     }
 
     /* Stop scanning once we have a controller. */
-    uni_bt_enable_new_connections_unsafe(false);
+    uni_bt_stop_scanning_unsafe();
 
     return UNI_ERROR_SUCCESS;
 }
@@ -156,12 +155,11 @@ static void platform_on_controller_data(uni_hid_device_t *d,
     critical_section_exit(&s_lock);
 }
 
-static int32_t platform_get_property(uni_platform_property_t key)
+static const uni_property_t *platform_get_property(uni_property_idx_t idx)
 {
-    /* Only relevant property: max # of devices. */
-    if (key == UNI_PLATFORM_PROPERTY_DELETE_STORED_KEYS)
-        return 0;
-    return 0;
+    (void)idx;
+    /* No custom properties; Bluepad32 defaults are fine. */
+    return NULL;
 }
 
 static void platform_on_oob_event(uni_platform_oob_event_t event, void *data)
@@ -231,5 +229,9 @@ bool bt_gamepad_get_report(uint8_t idx, gamepad_report_t *report)
 
 void bt_gamepad_set_pairing(bool enabled)
 {
-    uni_bt_enable_new_connections_unsafe(enabled);
+    if (enabled) {
+        uni_bt_start_scanning_and_autoconnect_unsafe();
+    } else {
+        uni_bt_stop_scanning_unsafe();
+    }
 }
