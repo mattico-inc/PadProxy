@@ -26,9 +26,10 @@ UNITY_SRC      = test/unity/unity.c
 
 # ── Dependencies ─────────────────────────────────────────────────────────
 
-PICO_SDK_TAG   ?= 2.1.0
-BLUEPAD32_DIR   = lib/bluepad32
-PICO_SDK_DIR    = lib/pico-sdk
+PICO_SDK_TAG    ?= 2.1.0
+BLUEPAD32_TAG   ?= 4.2.0
+BLUEPAD32_DIR    = lib/bluepad32
+PICO_SDK_DIR     = lib/pico-sdk
 
 # Use PICO_SDK_PATH if set by the user, otherwise clone to lib/pico-sdk
 PICO_SDK_PATH  ?= $(PICO_SDK_DIR)
@@ -56,7 +57,7 @@ all: firmware
 deps: $(BLUEPAD32_DIR) $(PICO_SDK_DIR)
 
 $(BLUEPAD32_DIR):
-	git clone https://gitlab.com/ricardoquesada/bluepad32.git $(BLUEPAD32_DIR)
+	git clone --branch $(BLUEPAD32_TAG) --depth 1 https://gitlab.com/ricardoquesada/bluepad32.git $(BLUEPAD32_DIR)
 
 $(PICO_SDK_DIR):
 	git clone --branch $(PICO_SDK_TAG) --depth 1 https://github.com/raspberrypi/pico-sdk.git $(PICO_SDK_DIR)

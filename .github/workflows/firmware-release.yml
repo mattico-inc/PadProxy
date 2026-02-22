@@ -1,0 +1,30 @@
+name: Firmware Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-and-release:
+    name: Build and Release Firmware
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ARM toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-none-eabi libnewlib-arm-none-eabi
+
+      - name: Build firmware
+        working-directory: firmware
+        run: make firmware
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: firmware/build/firmware/padproxy.uf2
+          generate_release_notes: true
