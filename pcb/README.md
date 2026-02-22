@@ -22,17 +22,14 @@ The Pico 2 W USB data lines connect directly to USB Port 1 for optimal HID laten
 - Optional 5VSB tap header for motherboards without USB standby
 - Pico 2 W has an onboard 3.3V buck-boost regulator (no external LDO needed)
 
-### Front Panel Interface
-- **Power button passthrough** - Physical button still works
+### Front Panel Interface (4-Wire Cable)
 - **Power button trigger** - Photo-MOSFET optocoupler (TLP222A) for polarity-agnostic "press"
-- **Power button sense** - Schottky bridge rectifier + PC817 optocoupler for polarity-agnostic detection
-- **Power LED sense** - Detect PC power state
-- All connections pass through to motherboard header
-- **Polarity agnostic** - All active circuits work regardless of wire orientation
+- **Power LED sense** - PC817 optocoupler for optically-isolated PC state detection
+- **4-wire cable** to motherboard front panel header (PWR_BTN trigger + PWR_LED sense)
+- **Full optical isolation** on all signals between PadProxy and motherboard
 
 ### Other Features
-- Status LEDs (RGB)
-- Optional OLED display header (I2C)
+- WS2812B addressable status LED (single GPIO, any color)
 - Compact form factor for internal PC mounting
 
 ## Connectors
@@ -42,8 +39,7 @@ The Pico 2 W USB data lines connect directly to USB Port 1 for optimal HID laten
 | USB_IN | 9-pin header socket | From motherboard USB header |
 | USB_OUT | 9-pin header pins | To user's USB devices |
 | USB_C | USB-C receptacle | Alt connection / development |
-| FP_IN | 2.54mm pads/header | From case front panel |
-| FP_OUT | 2.54mm pads/header | To motherboard front panel |
+| FP_CABLE | 4-pin header | 4-wire cable to motherboard front panel header |
 | 5VSB | 2-pin header | Optional backup power |
 
 ## Key Components
@@ -53,8 +49,8 @@ The Pico 2 W USB data lines connect directly to USB Port 1 for optimal HID laten
 | MCU | Raspberry Pi Pico 2 W | Main controller (RP2350 + CYW43439 BT/WiFi) |
 | Hub IC | FE1.1s | USB 2.0 hub (4-port) |
 | Photo-MOSFET Optocoupler | TLP222A | Power button trigger (polarity-agnostic) |
-| Optocoupler | PC817 | Power button sense (with bridge rectifier) |
-| Schottky Diodes | BAT54S (x2) or BAT54 (x4) | Bridge rectifier for sense circuit |
+| Optocoupler | PC817 | Power LED sense (optically isolated) |
+| Addressable LED | WS2812B / SK6812 | Status indicator |
 
 ## Files
 

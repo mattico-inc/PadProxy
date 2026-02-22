@@ -98,7 +98,7 @@ BT Controller → Bluepad32 → bt_gamepad (critical section) → main loop
 The state machine in `pc_power_state.c` is a pure-logic module with no hardware dependencies. It takes events as input and produces actions as output:
 
 - **States:** `PC_STATE_OFF` → `PC_STATE_BOOTING` → `PC_STATE_ON` → `PC_STATE_SLEEPING`
-- **Events:** Button presses, USB enumeration/suspension, power LED changes, boot timeout
+- **Events:** Wake requests, USB enumeration/suspension, power LED changes, boot timeout
 - **Actions (bitmask):** `PC_ACTION_TRIGGER_POWER`, `PC_ACTION_START_BOOT_TIMER`, `PC_ACTION_CANCEL_BOOT_TIMER`
 
 The HAL (`pc_power_hal.h` / `pc_power_hal.c`) abstracts GPIO and timer hardware. The RP2350 implementation uses Pico SDK alarm APIs for non-blocking power button pulses and boot timeouts. Tests exercise the state machine directly without needing the HAL.
@@ -175,7 +175,7 @@ firmware/test/
 - **BT Library:** Bluepad32 (supports Xbox, PlayStation, Switch Pro, 8BitDo, generic HID gamepads)
 - **USB Stack:** TinyUSB (bundled with Pico SDK), device mode only (HID gamepad)
 - **USB IDs:** VID 0x1209 (pid.codes shared), PID 0x0001 (placeholder)
-- **GPIO:** PWR_BTN_SENSE (GPIO 2), PWR_BTN_TRIGGER (GPIO 3), PWR_LED_SENSE (GPIO 4)
+- **GPIO:** PWR_BTN_TRIGGER (GPIO 2), PWR_LED_SENSE (GPIO 3), STATUS_LED (GPIO 4)
 - **UART:** printf output goes to UART (USB is occupied by HID device)
 
 ## Key Dependencies
