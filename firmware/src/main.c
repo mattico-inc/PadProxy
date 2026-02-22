@@ -84,7 +84,6 @@ static void on_bt_event(uint8_t idx, bt_gamepad_state_t state)
 
 /* ── Hardware polling ────────────────────────────────────────────────── */
 
-static bool s_prev_button;
 static bool s_prev_led;
 
 /**
@@ -92,16 +91,8 @@ static bool s_prev_led;
  */
 static void poll_hardware(uint32_t now_ms)
 {
-    bool button = pc_power_hal_read_button();
-    bool led    = pc_power_hal_read_power_led();
+    bool led = pc_power_hal_read_power_led();
     pc_power_result_t r;
-
-    /* Power button: rising edge = press */
-    if (button && !s_prev_button) {
-        printf("[padproxy] Power button pressed\n");
-        r = pc_power_sm_process(&s_power_sm, PC_EVENT_BUTTON_PRESSED, now_ms);
-        dispatch_actions(r.actions);
-    }
 
     /* Power LED edges */
     if (led && !s_prev_led) {
@@ -118,7 +109,6 @@ static void poll_hardware(uint32_t now_ms)
         dispatch_actions(r.actions);
     }
 
-    s_prev_button = button;
     s_prev_led = led;
 }
 
@@ -166,8 +156,7 @@ int main(void)
     /* Initialize power management */
     pc_power_hal_init();
     pc_power_sm_init(&s_power_sm);
-    s_prev_button = pc_power_hal_read_button();
-    s_prev_led    = pc_power_hal_read_power_led();
+    s_prev_led = pc_power_hal_read_power_led();
 
     /* Initialize USB HID gamepad (must be before BT so USB is ready) */
     usb_hid_gamepad_init(on_usb_state_change);
@@ -184,7 +173,7 @@ int main(void)
         /* Service USB stack */
         usb_hid_gamepad_task();
 
-        /* Poll hardware inputs (power button, LED, boot timer) */
+        /* Poll hardware inputs (power LED, boot timer) */
         poll_hardware(now_ms);
 
         /* Read BT gamepad and forward */

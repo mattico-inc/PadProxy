@@ -5,9 +5,8 @@
 
 /* ── GPIO assignments (from hardware design) ─────────────────────────── */
 
-#define GPIO_PWR_BTN_SENSE    2   /* Input: physical power button state   */
-#define GPIO_PWR_BTN_TRIGGER  3   /* Output: drives TLP222A photo-MOSFET  */
-#define GPIO_PWR_LED_SENSE    4   /* Input: motherboard power LED, clamped */
+#define GPIO_PWR_BTN_TRIGGER  2   /* Output: drives TLP222A photo-MOSFET  */
+#define GPIO_PWR_LED_SENSE    3   /* Input: PC817 optocoupler, active LOW  */
 
 /* ── Internal state ──────────────────────────────────────────────────── */
 
@@ -39,33 +38,26 @@ static int64_t boot_timer_alarm_cb(alarm_id_t id, void *user_data)
 
 void pc_power_hal_init(void)
 {
-    /* PWR_BTN_SENSE (GPIO 2): input with pull-up, active HIGH = pressed */
-    gpio_init(GPIO_PWR_BTN_SENSE);
-    gpio_set_dir(GPIO_PWR_BTN_SENSE, GPIO_IN);
-    gpio_pull_up(GPIO_PWR_BTN_SENSE);
-
-    /* PWR_BTN_TRIGGER (GPIO 3): output, initially LOW (relay open) */
+    /* PWR_BTN_TRIGGER (GPIO 2): output, initially LOW (optocoupler off) */
     gpio_init(GPIO_PWR_BTN_TRIGGER);
     gpio_set_dir(GPIO_PWR_BTN_TRIGGER, GPIO_OUT);
     gpio_put(GPIO_PWR_BTN_TRIGGER, false);
 
-    /* PWR_LED_SENSE (GPIO 4): input, Zener-clamped externally */
+    /* PWR_LED_SENSE (GPIO 3): input with pull-up (PC817 active LOW) */
     gpio_init(GPIO_PWR_LED_SENSE);
     gpio_set_dir(GPIO_PWR_LED_SENSE, GPIO_IN);
+    gpio_pull_up(GPIO_PWR_LED_SENSE);
 
     s_power_btn_alarm = 0;
     s_boot_timer_alarm = 0;
     s_boot_timer_expired = false;
 }
 
-bool pc_power_hal_read_button(void)
-{
-    return gpio_get(GPIO_PWR_BTN_SENSE);
-}
-
 bool pc_power_hal_read_power_led(void)
 {
-    return gpio_get(GPIO_PWR_LED_SENSE);
+    /* PC817 phototransistor pulls GPIO LOW when LED current flows (PC on).
+     * Invert so callers see: true = PC on, false = PC off. */
+    return !gpio_get(GPIO_PWR_LED_SENSE);
 }
 
 void pc_power_hal_trigger_power_button(uint32_t duration_ms)
