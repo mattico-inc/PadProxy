@@ -11,34 +11,28 @@
  * the state machine to be tested on the host with mock implementations.
  *
  * GPIO mapping (from design doc):
- *   GPIO 2 - PWR_BTN_SENSE   (input, active HIGH = pressed)
- *   GPIO 3 - PWR_BTN_TRIGGER (output, drives TLP222A photo-MOSFET)
- *   GPIO 4 - PWR_LED_SENSE   (input, HIGH = PC on, Zener-clamped)
+ *   GPIO 2 - PWR_BTN_TRIGGER (output, drives TLP222A photo-MOSFET)
+ *   GPIO 3 - PWR_LED_SENSE   (input, PC817 optocoupler, active LOW = PC on)
  */
 
 /**
  * Initialize power management GPIOs.
- *   - PWR_BTN_SENSE (GPIO 2): input with pull-up
- *   - PWR_BTN_TRIGGER (GPIO 3): output, initially LOW
- *   - PWR_LED_SENSE (GPIO 4): input
+ *   - PWR_BTN_TRIGGER (GPIO 2): output, initially LOW
+ *   - PWR_LED_SENSE (GPIO 3): input with pull-up
  */
 void pc_power_hal_init(void);
 
 /**
- * Read the physical power button state.
- * @return true if button is currently pressed (GPIO HIGH after optocoupler).
- */
-bool pc_power_hal_read_button(void);
-
-/**
  * Read the power LED sense line.
+ * The PC817 optocoupler output is active LOW (phototransistor pulls to GND
+ * when LED current flows). This function inverts the GPIO so callers see:
  * @return true if the motherboard power LED output is active (PC is on).
  */
 bool pc_power_hal_read_power_led(void);
 
 /**
  * Pulse the power button trigger optocoupler.
- * Drives GPIO 3 HIGH for the specified duration, then LOW.
+ * Drives GPIO 2 HIGH for the specified duration, then LOW.
  * @param duration_ms Pulse width in milliseconds (typical: 200ms).
  */
 void pc_power_hal_trigger_power_button(uint32_t duration_ms);

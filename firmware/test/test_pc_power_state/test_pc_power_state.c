@@ -43,23 +43,6 @@ void test_off_wake_requested_triggers_power_and_timer(void)
     TEST_ASSERT_BITS(PC_ACTION_START_BOOT_TIMER, PC_ACTION_START_BOOT_TIMER, r.actions);
 }
 
-void test_off_button_pressed_transitions_to_booting(void)
-{
-    pc_power_result_t r = pc_power_sm_process(&sm, PC_EVENT_BUTTON_PRESSED, 500);
-
-    TEST_ASSERT_EQUAL(PC_STATE_BOOTING, r.new_state);
-    TEST_ASSERT_TRUE(r.transitioned);
-}
-
-void test_off_button_pressed_starts_timer_no_trigger(void)
-{
-    pc_power_result_t r = pc_power_sm_process(&sm, PC_EVENT_BUTTON_PRESSED, 500);
-
-    /* Physical button passes through hardware; no need to trigger optocoupler */
-    TEST_ASSERT_BITS_LOW(PC_ACTION_TRIGGER_POWER, r.actions);
-    TEST_ASSERT_BITS(PC_ACTION_START_BOOT_TIMER, PC_ACTION_START_BOOT_TIMER, r.actions);
-}
-
 void test_off_power_led_on_transitions_to_booting(void)
 {
     pc_power_result_t r = pc_power_sm_process(&sm, PC_EVENT_POWER_LED_ON, 200);
@@ -83,7 +66,6 @@ void test_off_ignores_irrelevant_events(void)
         PC_EVENT_USB_SUSPENDED,
         PC_EVENT_POWER_LED_OFF,
         PC_EVENT_BOOT_TIMEOUT,
-        PC_EVENT_BUTTON_LONG_PRESSED,
     };
     for (int i = 0; i < (int)(sizeof(ignore) / sizeof(ignore[0])); i++) {
         pc_power_sm_init(&sm);
@@ -97,7 +79,7 @@ void test_off_ignores_irrelevant_events(void)
 
 static void enter_booting(uint32_t at_ms)
 {
-    pc_power_sm_process(&sm, PC_EVENT_BUTTON_PRESSED, at_ms);
+    pc_power_sm_process(&sm, PC_EVENT_POWER_LED_ON, at_ms);
     TEST_ASSERT_EQUAL(PC_STATE_BOOTING, pc_power_sm_get_state(&sm));
 }
 
@@ -137,21 +119,10 @@ void test_booting_timeout_returns_to_off(void)
     TEST_ASSERT_TRUE(r.transitioned);
 }
 
-void test_booting_long_press_returns_to_off(void)
-{
-    enter_booting(1000);
-    pc_power_result_t r = pc_power_sm_process(&sm, PC_EVENT_BUTTON_LONG_PRESSED, 5000);
-
-    TEST_ASSERT_EQUAL(PC_STATE_OFF, r.new_state);
-    TEST_ASSERT_TRUE(r.transitioned);
-    TEST_ASSERT_BITS(PC_ACTION_CANCEL_BOOT_TIMER, PC_ACTION_CANCEL_BOOT_TIMER, r.actions);
-}
-
 void test_booting_ignores_irrelevant_events(void)
 {
     pc_power_event_t ignore[] = {
         PC_EVENT_WAKE_REQUESTED,
-        PC_EVENT_BUTTON_PRESSED,
         PC_EVENT_USB_SUSPENDED,
         PC_EVENT_POWER_LED_ON,
     };
@@ -168,7 +139,7 @@ void test_booting_ignores_irrelevant_events(void)
 
 static void enter_on(uint32_t at_ms)
 {
-    pc_power_sm_process(&sm, PC_EVENT_BUTTON_PRESSED, at_ms);
+    pc_power_sm_process(&sm, PC_EVENT_POWER_LED_ON, at_ms);
     pc_power_sm_process(&sm, PC_EVENT_USB_ENUMERATED, at_ms + 5000);
     TEST_ASSERT_EQUAL(PC_STATE_ON, pc_power_sm_get_state(&sm));
 }
@@ -191,20 +162,10 @@ void test_on_power_led_off_transitions_to_off(void)
     TEST_ASSERT_TRUE(r.transitioned);
 }
 
-void test_on_long_press_transitions_to_off(void)
-{
-    enter_on(1000);
-    pc_power_result_t r = pc_power_sm_process(&sm, PC_EVENT_BUTTON_LONG_PRESSED, 10000);
-
-    TEST_ASSERT_EQUAL(PC_STATE_OFF, r.new_state);
-    TEST_ASSERT_TRUE(r.transitioned);
-}
-
 void test_on_ignores_irrelevant_events(void)
 {
     pc_power_event_t ignore[] = {
         PC_EVENT_WAKE_REQUESTED,
-        PC_EVENT_BUTTON_PRESSED,
         PC_EVENT_USB_ENUMERATED,
         PC_EVENT_POWER_LED_ON,
         PC_EVENT_BOOT_TIMEOUT,
@@ -245,18 +206,6 @@ void test_sleeping_wake_requested_triggers_power_and_timer(void)
     TEST_ASSERT_BITS(PC_ACTION_START_BOOT_TIMER, PC_ACTION_START_BOOT_TIMER, r.actions);
 }
 
-void test_sleeping_button_pressed_transitions_to_booting(void)
-{
-    enter_sleeping(1000);
-    pc_power_result_t r = pc_power_sm_process(&sm, PC_EVENT_BUTTON_PRESSED, 20000);
-
-    TEST_ASSERT_EQUAL(PC_STATE_BOOTING, r.new_state);
-    TEST_ASSERT_TRUE(r.transitioned);
-    /* Physical button - no trigger needed, but timer starts */
-    TEST_ASSERT_BITS_LOW(PC_ACTION_TRIGGER_POWER, r.actions);
-    TEST_ASSERT_BITS(PC_ACTION_START_BOOT_TIMER, PC_ACTION_START_BOOT_TIMER, r.actions);
-}
-
 void test_sleeping_usb_enumerated_transitions_to_on(void)
 {
     enter_sleeping(1000);
@@ -284,15 +233,6 @@ void test_sleeping_power_led_off_transitions_to_off(void)
     TEST_ASSERT_TRUE(r.transitioned);
 }
 
-void test_sleeping_long_press_transitions_to_off(void)
-{
-    enter_sleeping(1000);
-    pc_power_result_t r = pc_power_sm_process(&sm, PC_EVENT_BUTTON_LONG_PRESSED, 20000);
-
-    TEST_ASSERT_EQUAL(PC_STATE_OFF, r.new_state);
-    TEST_ASSERT_TRUE(r.transitioned);
-}
-
 void test_sleeping_ignores_irrelevant_events(void)
 {
     pc_power_event_t ignore[] = {
@@ -312,7 +252,7 @@ void test_sleeping_ignores_irrelevant_events(void)
 
 void test_transition_updates_timestamp(void)
 {
-    pc_power_sm_process(&sm, PC_EVENT_BUTTON_PRESSED, 1234);
+    pc_power_sm_process(&sm, PC_EVENT_POWER_LED_ON, 1234);
     TEST_ASSERT_EQUAL_UINT32(1234, sm.last_transition_ms);
 
     pc_power_sm_process(&sm, PC_EVENT_USB_ENUMERATED, 5678);
@@ -321,11 +261,10 @@ void test_transition_updates_timestamp(void)
 
 void test_no_transition_preserves_timestamp(void)
 {
-    pc_power_sm_process(&sm, PC_EVENT_BUTTON_PRESSED, 1000);
+    pc_power_sm_process(&sm, PC_EVENT_POWER_LED_ON, 1000);
     TEST_ASSERT_EQUAL_UINT32(1000, sm.last_transition_ms);
 
-    /* BOOT_TIMEOUT is ignored in BOOTING... wait, it's not - it transitions.
-     * Use USB_SUSPENDED which IS ignored in BOOTING. */
+    /* USB_SUSPENDED is ignored in BOOTING */
     pc_power_sm_process(&sm, PC_EVENT_USB_SUSPENDED, 9999);
     TEST_ASSERT_EQUAL_UINT32(1000, sm.last_transition_ms);
 }
@@ -354,8 +293,8 @@ void test_full_cycle_off_boot_on_sleep_off(void)
 
 void test_full_cycle_off_boot_on_shutdown(void)
 {
-    /* OFF -> BOOTING */
-    pc_power_sm_process(&sm, PC_EVENT_BUTTON_PRESSED, 0);
+    /* OFF -> BOOTING (LED on) */
+    pc_power_sm_process(&sm, PC_EVENT_POWER_LED_ON, 0);
     TEST_ASSERT_EQUAL(PC_STATE_BOOTING, pc_power_sm_get_state(&sm));
 
     /* BOOTING -> ON */
@@ -407,24 +346,6 @@ void test_boot_failure_timeout_then_retry(void)
     TEST_ASSERT_EQUAL(PC_STATE_ON, pc_power_sm_get_state(&sm));
 }
 
-void test_force_shutdown_from_on(void)
-{
-    enter_on(0);
-
-    pc_power_result_t r = pc_power_sm_process(&sm, PC_EVENT_BUTTON_LONG_PRESSED, 20000);
-    TEST_ASSERT_EQUAL(PC_STATE_OFF, r.new_state);
-    TEST_ASSERT_TRUE(r.transitioned);
-}
-
-void test_force_shutdown_from_sleeping(void)
-{
-    enter_sleeping(0);
-
-    pc_power_result_t r = pc_power_sm_process(&sm, PC_EVENT_BUTTON_LONG_PRESSED, 30000);
-    TEST_ASSERT_EQUAL(PC_STATE_OFF, r.new_state);
-    TEST_ASSERT_TRUE(r.transitioned);
-}
-
 /* ── Name helpers ─────────────────────────────────────────────────────── */
 
 void test_state_names(void)
@@ -439,8 +360,6 @@ void test_state_names(void)
 void test_event_names(void)
 {
     TEST_ASSERT_EQUAL_STRING("WAKE_REQUESTED",     pc_power_event_name(PC_EVENT_WAKE_REQUESTED));
-    TEST_ASSERT_EQUAL_STRING("BUTTON_PRESSED",     pc_power_event_name(PC_EVENT_BUTTON_PRESSED));
-    TEST_ASSERT_EQUAL_STRING("BUTTON_LONG_PRESSED", pc_power_event_name(PC_EVENT_BUTTON_LONG_PRESSED));
     TEST_ASSERT_EQUAL_STRING("USB_ENUMERATED",     pc_power_event_name(PC_EVENT_USB_ENUMERATED));
     TEST_ASSERT_EQUAL_STRING("USB_SUSPENDED",      pc_power_event_name(PC_EVENT_USB_SUSPENDED));
     TEST_ASSERT_EQUAL_STRING("POWER_LED_ON",       pc_power_event_name(PC_EVENT_POWER_LED_ON));
@@ -462,8 +381,6 @@ int main(void)
     /* OFF transitions */
     RUN_TEST(test_off_wake_requested_transitions_to_booting);
     RUN_TEST(test_off_wake_requested_triggers_power_and_timer);
-    RUN_TEST(test_off_button_pressed_transitions_to_booting);
-    RUN_TEST(test_off_button_pressed_starts_timer_no_trigger);
     RUN_TEST(test_off_power_led_on_transitions_to_booting);
     RUN_TEST(test_off_usb_enumerated_jumps_to_on);
     RUN_TEST(test_off_ignores_irrelevant_events);
@@ -473,23 +390,19 @@ int main(void)
     RUN_TEST(test_booting_usb_enumerated_cancels_timer);
     RUN_TEST(test_booting_power_led_off_returns_to_off);
     RUN_TEST(test_booting_timeout_returns_to_off);
-    RUN_TEST(test_booting_long_press_returns_to_off);
     RUN_TEST(test_booting_ignores_irrelevant_events);
 
     /* ON transitions */
     RUN_TEST(test_on_usb_suspended_transitions_to_sleeping);
     RUN_TEST(test_on_power_led_off_transitions_to_off);
-    RUN_TEST(test_on_long_press_transitions_to_off);
     RUN_TEST(test_on_ignores_irrelevant_events);
 
     /* SLEEPING transitions */
     RUN_TEST(test_sleeping_wake_requested_transitions_to_booting);
     RUN_TEST(test_sleeping_wake_requested_triggers_power_and_timer);
-    RUN_TEST(test_sleeping_button_pressed_transitions_to_booting);
     RUN_TEST(test_sleeping_usb_enumerated_transitions_to_on);
     RUN_TEST(test_sleeping_power_led_on_transitions_to_booting);
     RUN_TEST(test_sleeping_power_led_off_transitions_to_off);
-    RUN_TEST(test_sleeping_long_press_transitions_to_off);
     RUN_TEST(test_sleeping_ignores_irrelevant_events);
 
     /* Timestamp tracking */
@@ -501,8 +414,6 @@ int main(void)
     RUN_TEST(test_full_cycle_off_boot_on_shutdown);
     RUN_TEST(test_full_cycle_sleep_wake_cycle);
     RUN_TEST(test_boot_failure_timeout_then_retry);
-    RUN_TEST(test_force_shutdown_from_on);
-    RUN_TEST(test_force_shutdown_from_sleeping);
 
     /* Name helpers */
     RUN_TEST(test_state_names);

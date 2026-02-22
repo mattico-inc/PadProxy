@@ -8,8 +8,7 @@
  * PC Power State Machine
  *
  * Tracks the PC's power state based on hardware signals (power LED, USB
- * enumeration, button presses) and drives actions (power button trigger,
- * status LED updates).
+ * enumeration) and drives actions (power button trigger, status LED updates).
  *
  * States:
  *   PC_OFF      - PC is powered off (S5). MCU is on standby power.
@@ -32,10 +31,6 @@ typedef enum {
 typedef enum {
     /** Controller HOME/Guide/PS button pressed while PC is off or sleeping */
     PC_EVENT_WAKE_REQUESTED,
-    /** Physical front-panel power button pressed (short press) */
-    PC_EVENT_BUTTON_PRESSED,
-    /** Physical power button long press (>=4s, force shutdown) */
-    PC_EVENT_BUTTON_LONG_PRESSED,
     /** USB host enumeration detected (OS is running) */
     PC_EVENT_USB_ENUMERATED,
     /** USB host connection lost / suspended */

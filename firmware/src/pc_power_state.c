@@ -54,16 +54,6 @@ static pc_power_result_t handle_off(pc_power_sm_t *sm,
                           PC_ACTION_TRIGGER_POWER | PC_ACTION_START_BOOT_TIMER,
                           now_ms);
 
-    case PC_EVENT_BUTTON_PRESSED:
-        /*
-         * Physical power button pressed. The button signal passes through
-         * to the motherboard via the hardware passthrough. We just track
-         * the state change.
-         */
-        return transition(sm, PC_STATE_BOOTING,
-                          PC_ACTION_START_BOOT_TIMER,
-                          now_ms);
-
     case PC_EVENT_POWER_LED_ON:
         /*
          * Power LED came on without us seeing a button press (e.g., WoL,
@@ -119,14 +109,6 @@ static pc_power_result_t handle_booting(pc_power_sm_t *sm,
                           PC_ACTION_NONE,
                           now_ms);
 
-    case PC_EVENT_BUTTON_LONG_PRESSED:
-        /*
-         * User force-shutdown during boot. PC will power off.
-         */
-        return transition(sm, PC_STATE_OFF,
-                          PC_ACTION_CANCEL_BOOT_TIMER,
-                          now_ms);
-
     default:
         return no_change(sm);
     }
@@ -153,14 +135,6 @@ static pc_power_result_t handle_on(pc_power_sm_t *sm,
                           PC_ACTION_NONE,
                           now_ms);
 
-    case PC_EVENT_BUTTON_LONG_PRESSED:
-        /*
-         * Force shutdown via long press.
-         */
-        return transition(sm, PC_STATE_OFF,
-                          PC_ACTION_NONE,
-                          now_ms);
-
     default:
         return no_change(sm);
     }
@@ -178,15 +152,6 @@ static pc_power_result_t handle_sleeping(pc_power_sm_t *sm,
          */
         return transition(sm, PC_STATE_BOOTING,
                           PC_ACTION_TRIGGER_POWER | PC_ACTION_START_BOOT_TIMER,
-                          now_ms);
-
-    case PC_EVENT_BUTTON_PRESSED:
-        /*
-         * Physical button pressed while sleeping. Hardware passes it
-         * through; we track the state change.
-         */
-        return transition(sm, PC_STATE_BOOTING,
-                          PC_ACTION_START_BOOT_TIMER,
                           now_ms);
 
     case PC_EVENT_USB_ENUMERATED:
@@ -211,14 +176,6 @@ static pc_power_result_t handle_sleeping(pc_power_sm_t *sm,
         /*
          * LED off while sleeping - PC transitioned from sleep to full
          * shutdown (e.g., hibernate timeout, or power loss).
-         */
-        return transition(sm, PC_STATE_OFF,
-                          PC_ACTION_NONE,
-                          now_ms);
-
-    case PC_EVENT_BUTTON_LONG_PRESSED:
-        /*
-         * Force shutdown from sleep.
          */
         return transition(sm, PC_STATE_OFF,
                           PC_ACTION_NONE,
@@ -257,8 +214,6 @@ const char *pc_power_event_name(pc_power_event_t event)
 {
     switch (event) {
     case PC_EVENT_WAKE_REQUESTED:     return "WAKE_REQUESTED";
-    case PC_EVENT_BUTTON_PRESSED:     return "BUTTON_PRESSED";
-    case PC_EVENT_BUTTON_LONG_PRESSED: return "BUTTON_LONG_PRESSED";
     case PC_EVENT_USB_ENUMERATED:     return "USB_ENUMERATED";
     case PC_EVENT_USB_SUSPENDED:      return "USB_SUSPENDED";
     case PC_EVENT_POWER_LED_ON:       return "POWER_LED_ON";
