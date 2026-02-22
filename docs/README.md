@@ -23,7 +23,7 @@ PadProxy aims to support:
 
 1. Install PadProxy inside your PC case
 2. Connect USB cable to motherboard internal header or rear USB
-3. Connect power control header to front panel header
+3. Connect 4-wire cable to motherboard front panel header (PWR_BTN + PWR_LED)
 4. Route antenna outside case
 5. Power on and pair your controller
 6. Your PC will wake automatically when you press the controller's home button

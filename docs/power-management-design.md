@@ -21,7 +21,7 @@ This document captures the hardware design decisions for PadProxy's power manage
 1. **Stay powered when PC is off** - Device must remain active to receive controller input and wake PC
 2. **Detect PC power state** - Know when PC is on/off/sleeping to manage behavior
 3. **Wake PC reliably** - Support wake from full power-off (S5), not just sleep
-4. **Non-destructive installation** - Pass through existing connections, don't consume limited ports
+4. **Simple installation** - 4-wire cable to motherboard, no passthrough needed
 5. **Flexible power options** - Work with various motherboard configurations
 
 ---
@@ -122,64 +122,62 @@ Motherboard USB 2.0 Header (9-pin)
 
 ## Front Panel Interface
 
-### Passthrough Design
+### 4-Wire Connection
 
-PadProxy sits between the case's front panel connectors and the motherboard, allowing:
-- Physical power button still works
-- PadProxy can detect button presses
-- PadProxy can trigger "virtual" button presses
-- LED signals passed through for normal case operation
+PadProxy connects to the motherboard's front panel header via a **4-wire cable**.
+The case's existing front panel connectors (power button, power LED, reset, HDD LED)
+connect directly to the motherboard header as normal — PadProxy does **not** sit in
+the signal path.
+
+PadProxy's 4 wires connect **in parallel** with the case's front panel wires on the
+motherboard header pins:
+
+| Wire | Motherboard Pin | Circuit | Purpose |
+|------|----------------|---------|---------|
+| 1 | PWR_BTN A | TLP222A output | Power button trigger |
+| 2 | PWR_BTN B | TLP222A output | Power button trigger |
+| 3 | PWR_LED+ | PC817 input (+) | Power LED sense |
+| 4 | PWR_LED- | PC817 input (-) | Power LED sense |
+
+Both circuits use optocouplers for **full optical isolation** between PadProxy and
+the motherboard. No shared ground reference is needed.
 
 ### Wiring Diagram
 
 ```
-Case Front Panel              PadProxy PCB                 Motherboard
-Connectors                                                 Front Panel Header
-                         ┌────────────────────────┐
-┌─────────────┐          │                        │        ┌─────────────┐
-│ PWR BTN A ──│─────────►│─── Sense (bridge+opto)─│─►GPIO  │             │
-│ PWR BTN B ──│─────────►│───────────┬────────────│───────►│ PWR_BTN     │
-└─────────────┘          │           │            │───────►│             │
-                         │    Trigger (photo-MOSFET)       │             │
-                         │    via TLP222A         │        │             │
-                         │           └────────────│───────►│             │
-┌─────────────┐          │                        │        │             │
-│ PWR LED + ──│─────────►│─── Sense (Zener clamp)─│─►GPIO  │             │
-│             │          │───────────────────────►│───────►│ PWR_LED     │
-│ PWR LED - ──│─────────►│───────────────────────►│───────►│             │
-└─────────────┘          │                        │        │             │
-                         │                        │        │             │
-┌─────────────┐          │                        │        │             │
-│ RESET A ────│─────────►│─── Passthrough ────────│───────►│ RESET       │
-│ RESET B ────│─────────►│───────────┬────────────│───────►│             │
-└─────────────┘          │   Optional Trigger     │        │             │
-                         │   (TLP222A, DNP)       │        │             │
-                         │           └────────────│───────►│             │
-┌─────────────┐          │                        │        │             │
-│ HDD LED     │─────────►│─── (Passthrough) ─────►│───────►│ HDD_LED     │
-└─────────────┘          │                        │        └─────────────┘
-                         └────────────────────────┘
+PadProxy                      4-Wire Cable                Motherboard
+                                                          Front Panel Header
+┌──────────────────────┐                                 ┌─────────────┐
+│                      │                                 │             │
+│ TLP222A  ────────────│── Wire 1 ── PWR_BTN A ─────────│─ PWR_BTN    │
+│ (MOSFET out) ────────│── Wire 2 ── PWR_BTN B ─────────│─            │
+│                      │                                 │             │
+│ PC817    ◄───────────│── Wire 3 ── PWR_LED+  ◄────────│─ PWR_LED    │
+│ (LED in) ◄───────────│── Wire 4 ── PWR_LED-  ◄────────│─            │
+│                      │                                 │             │
+└──────────────────────┘                                 └─────────────┘
 
-DNP = Do Not Populate (footprint on PCB, component not soldered by default)
-PWR BTN / RESET labels use A/B instead of +/- (polarity agnostic)
-PWR LED retains +/- markings (user must connect correctly)
+Case front panel (power button, LED) also connects to the same
+motherboard header pins — not through PadProxy.
+PWR BTN labels use A/B instead of +/- (polarity agnostic).
+PWR LED retains +/- markings (user must connect correctly).
 ```
 
-### Design Constraint: Polarity Agnosticism
+### Polarity Agnosticism
 
-A critical design goal is that **all front panel connections must work regardless of
-how the user connects the wires**. PC front panel connectors vary by manufacturer, and
-users should not need to identify +/- polarity for the power button or LED wires.
+The **power button trigger** circuit is fully polarity-agnostic: the TLP222A
+photo-MOSFET conducts bidirectionally, so it works regardless of which PWR_BTN pin
+the motherboard pulls high.
 
-This drives two key component choices:
-- **Photo-MOSFET optocoupler** for triggering (MOSFET output conducts bidirectionally)
-- **Schottky bridge rectifier + optocoupler** for sensing (rectifies unknown polarity)
+The **power LED sense** circuit requires correct polarity: the user connects
+PWR_LED+ and PWR_LED- per silkscreen markings. Reverse connection causes no damage
+(the PC817 LED is simply reverse-biased within its rated voltage) but disables sensing.
 
 ### Power Button Trigger Circuit (Polarity-Agnostic)
 
-Uses a **photo-MOSFET optocoupler** (e.g., TLP222A, AQY212, or CPC1017N) instead of
-a standard phototransistor optocoupler. The MOSFET output is inherently bidirectional,
-acting as a true analog switch regardless of which direction current flows.
+Uses a **photo-MOSFET optocoupler** (e.g., TLP222A, AQY212, or CPC1017N). The MOSFET
+output is inherently bidirectional, acting as a true analog switch regardless of which
+direction current flows through the motherboard's PWR_BTN pins.
 
 ```
                     ┌──────────────────┐
@@ -189,6 +187,7 @@ GND ─────────────────►│       (bidir)  │
                     └───┬──────────┬───┘
                         │          │
   To Mobo PWR_BTN_A ───┘          └─── To Mobo PWR_BTN_B
+  (Wire 1)                              (Wire 2)
 ```
 
 **Operation:**
@@ -222,49 +221,21 @@ short two low-current pins, the photo-MOSFET is the better fit.
 | On-resistance | N/A (transistor) | ~4Ω (irrelevant for signal) | <0.1Ω |
 | Cost | $0.10 | $0.50-1.00 | $0.50-2.00 |
 
-### Power Button Sense Circuit (Polarity-Agnostic)
+### Power LED Sense Circuit (Optocoupler-Isolated)
 
-Uses a **Schottky bridge rectifier** feeding a standard optocoupler to detect when the
-physical power button is pressed. The bridge rectifier ensures correct polarity to the
-optocoupler LED regardless of which wire is +/- from the motherboard.
-
-```
-                         ┌──────────────────────────────────┐
-                         │      Schottky Bridge Rectifier   │
-                         │          (4x BAT54 / SS14)       │
-                         │                                  │
-Mobo PWR_BTN_A ──┬──────│──►D1──┬───[470Ω]──►│ PC817 LED+ │
-                 │       │      │            │             │
-                 │       │    + DC out       │  Optocoupler│
-                 │       │      │            │             │
-                 │       │      │◄──[LED-]───│◄────────────│
-                 │       │      │            │             │
-Mobo PWR_BTN_B ──┬──────│──►D3──┘           │  Phototrans │──► Pico GPIO
-                 │       │                   │  (output)   │     (input, pull-up)
-                 │       │  D2, D4 complete  │             │
-                 │       │  the bridge       └─────────────┘
-                 │       └──────────────────────────────────┘
-                 │
-                 └──── (passthrough to case button wires)
-```
-
-**Simplified schematic:**
+Uses a **PC817 phototransistor optocoupler** to detect the motherboard's power LED
+signal. Both PWR_LED+ and PWR_LED- are brought to PadProxy via the 4-wire cable,
+providing a differential measurement with full optical isolation. No shared ground
+reference between PadProxy and the motherboard is needed.
 
 ```
-Mobo Pin A ──┬──────────────────────────────── Case Button Wire A
-             │
-             ├──┤D1►──┬──[470Ω]──[PC817 LED]──┬──◄D4├──┤
-             │        │                        │        │
-             │        │    (bridge provides    │        │
-             │        │     correct polarity)  │        │
-             │        │                        │        │
-             ├──◄D2├──┘                        └──┤D3►──┤
-             │                                          │
-Mobo Pin B ──┴──────────────────────────────── Case Button Wire B
+PWR_LED+ (Wire 3) ──[470Ω]──► PC817 LED anode
+                                            │
+PWR_LED- (Wire 4) ──────────► PC817 LED cathode
 
 
 PC817 Output (phototransistor):
-  VCC ──[10kΩ]──┬──► Pico GPIO (PWR_BTN_SENSE)
+  VCC ──[10kΩ]──┬──► Pico GPIO (PWR_LED_SENSE, input)
                 │
            [collector]
                 │
@@ -272,57 +243,25 @@ PC817 Output (phototransistor):
 ```
 
 **Operation:**
-- Button **not pressed**: Motherboard has voltage across the two pins (typically
-  3.3V or 5V from internal pull-up). Current flows through bridge + optocoupler.
-  PC817 phototransistor conducts. GPIO reads LOW.
-- Button **pressed**: Both pins shorted together, no voltage differential, no current
-  through optocoupler. Phototransistor off. GPIO pulled HIGH by pull-up resistor.
-- **Logic is inverted**: GPIO HIGH = button pressed, GPIO LOW = button not pressed.
-- Debounce in firmware: ~50ms
+- Mobo LED output active → current flows through PC817 LED → phototransistor
+  conducts → GPIO reads LOW → PC is ON
+- Mobo LED output off → no current → phototransistor off → GPIO pulled HIGH
+  by pull-up resistor → PC is OFF (or sleeping)
+- **Logic is inverted**: GPIO HIGH = PC off, GPIO LOW = PC on
+- Full optical isolation: motherboard voltage never reaches PadProxy GPIOs
 
-**Voltage budget (worst case at 3.3V motherboard pull-up):**
-- Schottky bridge: 2 x 0.3V = 0.6V
+**Voltage budget:**
 - PC817 LED Vf: ~1.2V
-- Remaining for resistor: 3.3V - 0.6V - 1.2V = 1.5V
-- With 470Ω resistor: ~3.2mA (sufficient for PC817, min ~1mA for reliable turn-on)
-- At 5V pull-up: ~6.8mA (well within limits)
+- At 3.3V motherboard: (3.3V - 1.2V) / 470Ω = ~4.5mA (reliable, min ~1mA)
+- At 5V motherboard: (5V - 1.2V) / 470Ω = ~8.1mA (well within limits)
 
-**Why Schottky diodes?** Standard silicon diodes (1N4148) have ~0.7V forward drop,
-giving a bridge drop of 1.4V. At 3.3V that leaves only 0.7V after the LED -- too
-tight for reliable operation. Schottky diodes (BAT54, BAT43, SS14) drop only ~0.3V.
+**Polarity:** User must connect PWR_LED+ and PWR_LED- correctly per silkscreen.
+Reverse connection causes no damage (PC817 LED is reverse-biased, max reverse
+voltage rating 6V) but disables sensing.
 
-### Power LED Sense Circuit
-
-The power LED header has a defined polarity from the motherboard, so the user is
-expected to connect +/- correctly (clearly marked on the PCB silkscreen).
-
-**IMPORTANT: 5V Tolerance.** The RP2350 GPIOs are NOT 5V tolerant (absolute max
-is 3.63V). Motherboard LED headers can output 5V. A **3.3V Zener diode
-clamp** (BZX84C3V3) protects the GPIO while allowing correct sensing at both 3.3V
-and 5V motherboard voltages.
-
-```
-PWR_LED+ ─────┬─────────────────────► To Case LED (optional)
-              │
-              └────[10kΩ]──┬─────────► Pico GPIO (PWR_LED_SENSE, input)
-                           │
-                       [3.3V Zener]   (BZX84C3V3 - clamps to 3.3V if input >3.3V)
-                           │
-                          GND
-
-PWR_LED- ─────────────────────────────► To Case LED GND (passthrough)
-```
-
-**Operation:**
-- Mobo LED output HIGH (3.3V or 5V) -> Zener clamps if needed -> GPIO reads HIGH -> PC is ON
-- Mobo LED output LOW (0V) -> GPIO reads LOW -> PC is OFF (or sleeping)
-- At 5V input: Zener clamps to ~3.3V, current through 10kΩ = (5-3.3)/10k = 0.17mA (negligible)
-- At 3.3V input: Zener does not conduct (below breakdown), GPIO sees full 3.3V
-
-**Polarity:** User must connect +/- correctly. Silkscreen markings should be clear.
-If connected backwards, the LED on the case won't light and the sense circuit won't
-detect the motherboard's signal -- but no damage will occur (the GPIO is protected
-by the Zener and the input resistor).
+**Advantage over previous Zener clamp design:** Full optical isolation eliminates
+any ground reference dependency between PadProxy and the motherboard. Inherently
+5V tolerant without a Zener diode, since the optocoupler provides galvanic separation.
 
 ---
 
@@ -335,7 +274,7 @@ by the Zener and the input resistor).
 | Power LED sense | High | PC on/off | Primary method |
 | USB enumeration | High | PC on + booted | Confirms OS running |
 | USB VBUS monitoring | Medium | Power state changes | Supplementary |
-| Physical button press | High | User interaction | For state tracking |
+| Physical button press | N/A | User interaction | Not monitored (covered by LED + USB) |
 
 ### State Machine
 
@@ -347,7 +286,7 @@ by the Zener and the input resistor).
          │          └────────┬─────────┘           │
          │                   │                     │
          │          Controller HOME pressed        │
-         │          or physical button             │
+         │          or power LED on                │
          │                   │                     │
          │                   ▼                     │
          │          ┌──────────────────┐           │
@@ -428,7 +367,7 @@ by the Zener and the input resistor).
 |-----------|------|------|---------|
 | USB_IN | USB 2.0 9-pin header socket | 9 | From motherboard (primary) |
 | USB_C | USB-C receptacle | 24 | Alt data+power / dev / fallback |
-| FP_IN | 2.54mm headers or pads | 8+ | From case front panel |
+| FP_CABLE | 4-pin header (JST-XH or 2.54mm) | 4 | 4-wire cable to motherboard front panel header |
 | 5VSB_IN | 2-pin header | 2 | Optional backup power |
 
 ### Output Connectors
@@ -436,7 +375,6 @@ by the Zener and the input resistor).
 | Connector | Type | Pins | Purpose |
 |-----------|------|------|---------|
 | USB_OUT | USB 2.0 9-pin header pins | 9 | To user's USB devices (via hub) |
-| FP_OUT | 2.54mm headers or pads | 8+ | To motherboard front panel header |
 
 ### Connection Modes
 
@@ -536,44 +474,24 @@ Standard ATX front panel header:
 | MCU | Raspberry Pi Pico 2 W | Module | Main controller (RP2350 + CYW43439 BT/WiFi) | $7.00 |
 | USB Hub | FE1.1s | SSOP-28 | USB port expansion | $0.50 |
 | Photo-MOSFET Optocoupler | TLP222A (or AQY212 / CPC1017N) | DIP-4/SOP-4 | Power button trigger (polarity-agnostic) | $0.60 |
-| Optocoupler (sense) | PC817 | DIP-4/SMD | Power button sense (with bridge rectifier) | $0.10 |
-| Schottky diodes | BAT54S (dual) or 4x BAT54 | SOT-23 / SOD-323 | Bridge rectifier for sense circuit | $0.15 |
-| Zener diode | BZX84C3V3 | SOT-23 | 5V clamp for LED sense GPIO | $0.02 |
+| Optocoupler (sense) | PC817 | DIP-4/SMD | Power LED sense (optically isolated) | $0.10 |
+| Addressable LED | WS2812B or SK6812 | 5050 | Status indicator (single-wire protocol) | $0.05 |
 | Crystal | 12MHz | HC49/SMD | Hub clock | $0.15 |
-| Photo-MOSFET Optocoupler | TLP222A | DIP-4/SOP-4 | *Optional:* Reset button trigger | $0.60 |
 
-### Power Button Circuit Components
+### Power Button Trigger Components
 
 | Component | Value | Qty | Purpose |
 |-----------|-------|-----|---------|
 | Photo-MOSFET optocoupler | TLP222A | 1 | Trigger - shorts motherboard PWR_BTN pins |
 | Resistor | 330Ω | 1 | Current limit for trigger optocoupler LED |
-| PC817 optocoupler | PC817 | 1 | Sense - detects physical button press |
-| Schottky diodes | BAT54 | 4 (or 2x BAT54S dual) | Bridge rectifier for sense polarity agnosticism |
-| Resistor | 470Ω | 1 | Current limit for sense optocoupler LED |
-| Resistor | 10kΩ | 1 | Pull-up for sense optocoupler output to Pico GPIO |
 
 ### Power LED Sense Components
 
 | Component | Value | Qty | Purpose |
 |-----------|-------|-----|---------|
-| Resistor | 10kΩ | 1 | Current limit / sense resistor for LED signal |
-| Zener diode | BZX84C3V3 (3.3V) | 1 | Clamp to protect Pico GPIO from 5V motherboard output |
-
-### Optional: Reset Button Trigger Components
-
-Identical circuit to power button trigger. Allows firmware to trigger a hardware
-reset remotely (e.g., watchdog recovery, remote management). The reset button still
-passes through for normal physical use.
-
-| Component | Value | Qty | Purpose |
-|-----------|-------|-----|---------|
-| Photo-MOSFET optocoupler | TLP222A | 1 | Trigger - shorts motherboard RESET pins |
-| Resistor | 330Ω | 1 | Current limit for trigger optocoupler LED |
-
-**BOM impact of optional reset trigger: ~$0.61** (one TLP222A + one resistor).
-PCB footprint is present but component can be left unpopulated (DNP) to save cost
-on builds that don't need remote reset capability.
+| PC817 optocoupler | PC817 | 1 | Sense - detects power LED state (optically isolated) |
+| Resistor | 470Ω | 1 | Current limit for sense optocoupler LED input |
+| Resistor | 10kΩ | 1 | Pull-up for sense optocoupler output to Pico GPIO |
 
 ### USB Hub Support Components
 
@@ -592,33 +510,27 @@ on builds that don't need remote reset capability.
 | USB 2.0 Header (F) | Generic 9-pin | Input from motherboard | $0.30 |
 | USB 2.0 Header (M) | Generic 9-pin | Output to user devices | $0.30 |
 | USB-C Receptacle | Generic 16-pin | Alt connection | $0.40 |
-| 2.54mm Pin Headers | Generic | Front panel connections (default) | $0.20 |
-| Screw Terminals | 2-pos 2.54mm pitch | *Optional:* Front panel alt (not populated by default) | $0.40 |
+| 4-pin connector | JST-XH or 2.54mm header | 4-wire cable to motherboard front panel header | $0.20 |
 
-### Front Panel Connector Design
+### 4-Wire Cable Connector
 
-The PCB provides **dual-footprint pads** for each front panel signal pair (PWR_BTN,
-PWR_LED, RESET, HDD_LED):
+The PadProxy PCB has a single **4-pin connector** (JST-XH or 2.54mm pin header) for
+the cable to the motherboard's front panel header. The cable carries two pairs of
+signals: PWR_BTN trigger (wires 1-2) and PWR_LED sense (wires 3-4).
 
-- **Default: 2.54mm pin headers** - Standard 2-pin headers per signal, matching the
-  individual DuPont-style wires that come from PC cases. One pair of pins per signal.
-- **Optional: Screw terminals** - Same pad locations accept 2.54mm pitch screw terminals
-  for users who prefer tool-less wire connection. Not soldered by default to save cost
-  and board height. User can solder on themselves if preferred.
-
-Both connector types share the same footprint location -- only one can be populated
-per signal pair.
+On the motherboard end, the cable terminates in individual DuPont-style 2-pin
+connectors that plug into the standard front panel header pins alongside the case's
+own front panel wires.
 
 ### Estimated Total BOM Cost
 
 | Category | Cost | Notes |
 |----------|------|-------|
-| Active components | ~$8.50 | MCU, hub, optocouplers |
-| Passive components | ~$0.50 | Resistors, caps, crystal, Zener |
-| Connectors | ~$1.20 | USB headers, USB-C, pin headers |
+| Active components | ~$8.00 | MCU, hub, optocouplers, LED |
+| Passive components | ~$0.30 | Resistors, caps, crystal |
+| Connectors | ~$1.20 | USB headers, USB-C, 4-pin header |
 | PCB (qty 5) | ~$2.00 each | |
-| **Total per unit (base)** | **~$12.20** | Without optional reset trigger |
-| **Total per unit (full)** | **~$12.80** | With optional reset trigger |
+| **Total per unit** | **~$11.50** | |
 
 ---
 
@@ -628,15 +540,9 @@ per signal pair.
 
 | GPIO | Function | Direction | Notes |
 |------|----------|-----------|-------|
-| 2 | PWR_BTN_SENSE | Input | Detect physical button press (PC817 output, active HIGH = pressed, pull-up) |
-| 3 | PWR_BTN_TRIGGER | Output | Photo-MOSFET optocoupler drive (TLP222A LED) |
-| 4 | PWR_LED_SENSE | Input | Detect PC power state (Zener-clamped for 5V tolerance) |
-| 5 | STATUS_LED_R | Output | RGB status - Red |
-| 6 | STATUS_LED_G | Output | RGB status - Green |
-| 7 | STATUS_LED_B | Output | RGB status - Blue |
-| 8 | I2C_SDA | Bidir | Optional OLED display |
-| 9 | I2C_SCL | Output | Optional OLED display |
-| 10 | RST_BTN_TRIGGER | Output | Optional: Photo-MOSFET optocoupler drive for reset (TLP222A LED) |
+| 2 | PWR_BTN_TRIGGER | Output | Photo-MOSFET optocoupler drive (TLP222A LED) |
+| 3 | PWR_LED_SENSE | Input | PC817 output (active LOW = PC on, pull-up) |
+| 4 | STATUS_LED | Output | WS2812B addressable LED data line |
 
 **USB:** Handled by the Pico 2 W module internally. USB D+/D- are routed from the
 module's castellated pads (or test points TP1/TP3) to the carrier PCB.
@@ -646,11 +552,10 @@ the onboard PCB antenna — no external antenna connector needed.
 
 ### Notes on GPIO Selection
 
-1. **GPIO 2-4** - Front panel interface (sense and trigger), matching firmware definitions
-2. **GPIO 5-7** - Status LEDs, adjacent pins for clean routing
-3. **GPIO 8-9** - Hardware I2C0 (SDA/SCL) for optional OLED
-4. **GPIO 10** - Optional reset trigger, near other front panel GPIOs
-5. **Avoid GPIO 0, 1** - Reserved for UART TX/RX (debug output)
+1. **GPIO 2** - Power button trigger
+2. **GPIO 3** - Power LED sense (optocoupler output)
+3. **GPIO 4** - WS2812B addressable LED data
+4. **Avoid GPIO 0, 1** - Reserved for UART TX/RX (debug output)
 
 ---
 
@@ -673,8 +578,7 @@ the onboard PCB antenna — no external antenna connector needed.
 
 - USBLC6-2 on USB data lines recommended
 - TVS diode on 5V input recommended
-- Front panel connections through optocoupler provide isolation
-- 3.3V Zener clamp (BZX84C3V3) on PWR_LED_SENSE GPIO for 5V motherboard compatibility
+- All front panel connections through optocouplers provide full galvanic isolation
 
 ### Mechanical
 
@@ -686,28 +590,33 @@ the onboard PCB antenna — no external antenna connector needed.
 
 ## Design Decisions (Resolved)
 
-### D1: Power LED Sense - Polarity (RESOLVED)
+### D1: Power LED Sense (RESOLVED → REVISED v0.5)
 
-**Decision: Keep simple resistive sense with Zener clamp.** User connects +/- correctly
-per silkscreen markings. The LED header has a defined polarity from the motherboard,
-so users are expected to know which wire is + (unlike the power button which is an
-unpolarized switch). A 3.3V Zener diode clamp protects the GPIO from 5V motherboards.
-Reverse connection causes no damage but disables sensing.
+**Decision: Use PC817 optocoupler for full optical isolation.** Both PWR_LED+ and
+PWR_LED- are brought to PadProxy via the 4-wire cable. The optocoupler provides
+galvanic separation and inherent 5V tolerance without a Zener diode. User connects
++/- correctly per silkscreen. Reverse connection causes no damage but disables sensing.
 
-### D2: Reset Button Trigger (RESOLVED)
+*Previous (v0.3): Zener clamp with resistive sense. Changed because the 4-wire
+connection eliminates shared ground, making a direct resistive sense impossible.*
 
-**Decision: Include as optional (DNP by default).** The PCB footprint includes a
-second TLP222A photo-MOSFET optocoupler and 330Ω resistor for reset trigger
-capability. These components are **not populated by default** to save ~$0.61.
-Users who want remote reset (e.g., watchdog recovery) can solder them on.
-GPIO 10 is reserved for this function.
+### D2: Reset Button Trigger (RESOLVED → REMOVED v0.5)
 
-### D3: Front Panel Connector Format (RESOLVED)
+**Decision: Removed entirely.** Not worth the complexity and extra wires. Long-press
+power button handles forced shutdown. The 4-wire cable design has no passthrough, so
+there is no natural place to intercept the reset signal.
 
-**Decision: Dual-footprint -- standard 2.54mm pin headers (default) with optional
-screw terminal pads.** Individual 2-pin headers per signal match how PC case wires
-come. The PCB pads also accept 2.54mm pitch screw terminals for users who prefer
-them. Only one type can be populated per signal pair.
+*Previous (v0.3): Optional DNP footprint with TLP222A. Removed to simplify the
+4-wire external connector design.*
+
+### D3: Front Panel Connector Format (RESOLVED → REVISED v0.5)
+
+**Decision: Single 4-pin connector** (JST-XH or 2.54mm header) on the PadProxy PCB.
+The cable terminates in individual DuPont-style 2-pin connectors on the motherboard
+end, plugging into the standard front panel header alongside the case's own wires.
+
+*Previous (v0.3): Dual-footprint per signal (header + screw terminal) for 8+ wires.
+Simplified to 4-wire cable with single connector.*
 
 ### D4: Voltage Compatibility (RESOLVED)
 
@@ -717,16 +626,32 @@ below 3.3V on standard ATX boards. Some industrial boards (e.g., ASRock IMB-140D
 offer jumper selection between 3.3V and 5V.
 
 **Impact on design:**
-- **Button sense circuit (bridge + optocoupler):** Works at both 3.3V and 5V.
-  At 3.3V: ~3.2mA through optocoupler LED (above PC817 minimum). At 5V: ~6.8mA.
-  The optocoupler provides complete isolation, so 5V never reaches the Pico 2 W.
 - **Button trigger circuit (photo-MOSFET):** Load side is completely isolated from
   the Pico 2 W. Works at any voltage up to the TLP222A's 60V rating.
-- **LED sense circuit:** 5V motherboard output clamped to 3.3V by Zener diode.
-  Pico GPIO protected.
-- **RP2350 is NOT 5V tolerant** (absolute max 3.63V). All GPIO inputs
-  from motherboard signals are now protected either by optocoupler isolation or
-  Zener clamping.
+- **LED sense circuit (optocoupler):** PC817 input handles both 3.3V and 5V.
+  At 3.3V: ~4.5mA through LED (reliable). At 5V: ~8.1mA (well within limits).
+  Full optical isolation, so motherboard voltage never reaches PadProxy.
+- **RP2350 is NOT 5V tolerant** (absolute max 3.63V). All GPIO connections to
+  the motherboard use optocoupler isolation — no direct electrical connection.
+
+### D5: Power Button Sense (RESOLVED v0.5)
+
+**Decision: Removed.** Physical button press detection is unnecessary. The power LED
+sense and USB enumeration/suspension signals fully cover all PC state transitions.
+The button sense circuit (Schottky bridge rectifier + PC817) only provided marginally
+faster state tracking (~ms) at the cost of 6 extra components and 2 GPIOs.
+
+### D6: OLED Display Header (RESOLVED v0.5)
+
+**Decision: Removed.** No practical use case for a display on an internal PC device.
+The WS2812B addressable LED provides sufficient status indication (multiple colors,
+patterns) using a single GPIO instead of 2 (I2C SDA/SCL).
+
+### D7: Status LED (RESOLVED v0.5)
+
+**Decision: WS2812B addressable LED.** Replaces 3 discrete LEDs + 3 resistors with
+a single integrated package. Any color, 1 GPIO (data line), ~$0.05. The WS2812B
+protocol is well-supported with simple bit-banging or PIO on RP2350.
 
 ## Open Design Questions
 
@@ -754,3 +679,4 @@ for now due to wide availability and DIP-4 hand-soldering friendliness.
 | 0.2 | 2026-02-06 | Revised to polarity-agnostic design: photo-MOSFET optocoupler for trigger, Schottky bridge + PC817 for sense. Added open design questions. Updated BOM. |
 | 0.3 | 2026-02-07 | Added 5V tolerance protection (Zener clamp on LED sense). Added optional reset trigger circuit (DNP). Dual-footprint connectors (headers + screw terminals). Resolved design questions D1-D4. Updated BOM and GPIO table. |
 | 0.4 | 2026-02-21 | Migrated from ESP32-S3-WROOM-1 to Raspberry Pi Pico 2 W (RP2350). Removed external LDO and antenna connector. Updated GPIO assignments, power budget, BOM, and all circuit descriptions. |
+| 0.5 | 2026-02-22 | Simplified front panel interface: removed power button sense circuit (bridge rectifier + PC817), replaced LED Zener clamp with PC817 optocoupler for full optical isolation, 4-wire cable design (PWR_BTN trigger + PWR_LED sense). Removed reset trigger, OLED header. Replaced discrete RGB LEDs with WS2812B addressable LED. Reduced GPIO count from 8 to 3. Updated BOM, connector specs, design decisions D1-D7. |
