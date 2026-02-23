@@ -19,12 +19,28 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-arm-none-eabi libnewlib-arm-none-eabi
 
+      - name: Extract version from tag
+        id: version
+        run: |
+          TAG=${GITHUB_REF#refs/tags/v}
+          echo "major=$(echo $TAG | cut -d. -f1)" >> $GITHUB_OUTPUT
+          echo "minor=$(echo $TAG | cut -d. -f2)" >> $GITHUB_OUTPUT
+          echo "patch=$(echo $TAG | cut -d. -f3)" >> $GITHUB_OUTPUT
+
       - name: Build firmware
         working-directory: firmware
-        run: make firmware
+        run: >
+          make firmware
+          CMAKE_ARGS="-DPICO_BOARD=pico2_w
+          -DPICO_SDK_PATH=$(pwd)/lib/pico-sdk
+          -DPADPROXY_VERSION_MAJOR=${{ steps.version.outputs.major }}
+          -DPADPROXY_VERSION_MINOR=${{ steps.version.outputs.minor }}
+          -DPADPROXY_VERSION_PATCH=${{ steps.version.outputs.patch }}"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: firmware/build/firmware/padproxy.uf2
+          files: |
+            firmware/build/firmware/padproxy.uf2
+            firmware/build/firmware/padproxy.bin
           generate_release_notes: true

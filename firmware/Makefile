@@ -36,7 +36,7 @@ PICO_SDK_PATH  ?= $(PICO_SDK_DIR)
 
 # ── Test binaries ────────────────────────────────────────────────────────
 
-TEST_BINS = $(TEST_BUILD_DIR)/test_pc_power_state $(TEST_BUILD_DIR)/test_gamepad
+TEST_BINS = $(TEST_BUILD_DIR)/test_pc_power_state $(TEST_BUILD_DIR)/test_gamepad $(TEST_BUILD_DIR)/test_ota_version
 
 # ── Firmware cmake arguments ─────────────────────────────────────────────
 
@@ -101,6 +101,9 @@ $(TEST_BUILD_DIR)/test_pc_power_state: test/test_pc_power_state/test_pc_power_st
 	$(CC) $(CFLAGS) -o $@ $^
 
 $(TEST_BUILD_DIR)/test_gamepad: test/test_gamepad/test_gamepad.c src/usb_hid_report.c $(UNITY_SRC) | $(TEST_BUILD_DIR)
+	$(CC) $(CFLAGS) -o $@ $^
+
+$(TEST_BUILD_DIR)/test_ota_version: test/test_ota_version/test_ota_version.c src/ota_version.c $(UNITY_SRC) | $(TEST_BUILD_DIR)
 	$(CC) $(CFLAGS) -o $@ $^
 
 $(TEST_BUILD_DIR):

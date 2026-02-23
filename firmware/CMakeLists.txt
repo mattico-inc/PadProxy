@@ -44,9 +44,33 @@ add_executable(padproxy
     src/usb_hid_report.c
     src/pc_power_state.c
     src/pc_power_hal.c
+    src/ota_version.c
+    src/ota_update.c
 )
 
 target_include_directories(padproxy PRIVATE include src)
+
+# ── OTA configuration (override with cmake -D flags) ────────────────────
+# WiFi credentials for OTA update checks
+set(WIFI_SSID "" CACHE STRING "WiFi SSID for OTA updates")
+set(WIFI_PASSWORD "" CACHE STRING "WiFi password for OTA updates")
+# GitHub repository for firmware releases
+set(GITHUB_OTA_OWNER "mattico-inc" CACHE STRING "GitHub owner for OTA releases")
+set(GITHUB_OTA_REPO "PadProxy" CACHE STRING "GitHub repo for OTA releases")
+# Firmware version (set automatically from git tags in CI)
+set(PADPROXY_VERSION_MAJOR 0 CACHE STRING "Firmware major version")
+set(PADPROXY_VERSION_MINOR 0 CACHE STRING "Firmware minor version")
+set(PADPROXY_VERSION_PATCH 0 CACHE STRING "Firmware patch version")
+
+target_compile_definitions(padproxy PRIVATE
+    WIFI_SSID="${WIFI_SSID}"
+    WIFI_PASSWORD="${WIFI_PASSWORD}"
+    GITHUB_OTA_OWNER="${GITHUB_OTA_OWNER}"
+    GITHUB_OTA_REPO="${GITHUB_OTA_REPO}"
+    PADPROXY_VERSION_MAJOR=${PADPROXY_VERSION_MAJOR}
+    PADPROXY_VERSION_MINOR=${PADPROXY_VERSION_MINOR}
+    PADPROXY_VERSION_PATCH=${PADPROXY_VERSION_PATCH}
+)
 
 target_link_libraries(padproxy
     pico_stdlib
@@ -54,6 +78,8 @@ target_link_libraries(padproxy
     tinyusb_device
     pico_btstack_cyw43
     pico_cyw43_arch_threadsafe_background
+    pico_lwip_mbedtls
+    pico_lwip_http
     bluepad32
 )
 
