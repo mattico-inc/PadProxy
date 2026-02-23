@@ -7,10 +7,10 @@
 
 #include "pico/stdlib.h"
 #include "pico/cyw43_arch.h"
+#include "pico/bootrom.h"
 #include "hardware/flash.h"
-#include "hardware/resets.h"
-#include "hardware/watchdog.h"
 #include "hardware/sync.h"
+#include "boot/picobin.h"
 
 #include "lwip/tcp.h"
 #include "lwip/dns.h"
@@ -36,21 +36,82 @@
 #define HTTP_TIMEOUT_MS           20000
 #define MAX_REDIRECTS             3
 
-/* ── Flash layout ────────────────────────────────────────────────────── */
+/* ── RP2350 TBYB / partition helpers ─────────────────────────────────── */
 
 /*
- * The Pico 2 W has 4 MB of flash.  We reserve the upper half as a
- * staging area for OTA downloads.  After a successful download the
- * staging image is copied over the active application area and the
- * device reboots.
+ * The RP2350 boot ROM supports "Try Before You Buy" (TBYB): a new
+ * firmware image is written to the inactive A/B partition, then we
+ * issue a FLASH_UPDATE reboot.  The boot ROM executes the new image
+ * in TBYB mode.  If the new image calls rom_explicit_buy() within
+ * ~16.7 s it becomes permanent; otherwise the boot ROM rolls back to
+ * the previous partition on the next reset.
  *
- *   0x000000 – 0x0FFFFF  Active application (1 MB)
- *   0x100000 – 0x1FFFFF  OTA staging area   (1 MB)
+ * See RP2350 datasheet §5.1.17 and pico-sdk pico/bootrom.h.
  */
-#define OTA_STAGING_OFFSET  (1024 * 1024)      /* 1 MB into flash */
-#define OTA_MAX_IMAGE_SIZE  (1024 * 1024)      /* 1 MB max firmware */
-#define FLASH_SECTOR_SZ     FLASH_SECTOR_SIZE  /* 4 KB */
-#define FLASH_PAGE_SZ       FLASH_PAGE_SIZE    /* 256 B */
+
+/* UF2 family ID for RP2350 ARM Secure (must match partition_table.json) */
+#ifndef RP2350_ARM_S_FAMILY_ID
+#define RP2350_ARM_S_FAMILY_ID 0xe48bff59u
+#endif
+
+/* Work-area used by boot ROM partition calls (min 4 KB, 4-aligned). */
+static uint8_t s_rom_workarea[4096] __attribute__((aligned(4)));
+
+/**
+ * Accept the current TBYB image so the boot ROM does not roll back.
+ *
+ * Safe to call on every boot: if the image was not launched via a
+ * flash-update boot the call is a harmless no-op.
+ */
+void ota_accept_current_image(void)
+{
+    int rc = rom_explicit_buy(s_rom_workarea, sizeof(s_rom_workarea));
+    if (rc == 0) {
+        printf("[ota] TBYB image accepted (rom_explicit_buy ok)\n");
+    }
+    /* Any other return value means we weren't in a TBYB boot — fine. */
+}
+
+/* ── Partition discovery ─────────────────────────────────────────────── */
+
+/**
+ * Use the boot ROM to find the inactive A/B partition for our family
+ * and return its flash byte-offset (relative to XIP_BASE).
+ *
+ * @param flash_offset  Receives the partition's start offset in flash.
+ * @param max_size      Receives the partition's size in bytes.
+ * @return true on success.
+ */
+static bool find_target_partition(uint32_t *flash_offset, uint32_t *max_size)
+{
+    resident_partition_t part;
+    int rc = rom_get_uf2_target_partition(
+        s_rom_workarea, sizeof(s_rom_workarea),
+        RP2350_ARM_S_FAMILY_ID, &part);
+
+    if (rc != 0) {
+        printf("[ota] rom_get_uf2_target_partition failed: %d\n", rc);
+        return false;
+    }
+
+    /*
+     * resident_partition_t.permissions_and_location encodes first/last
+     * 4 KB sectors in the low 26 bits:
+     *   [12:0]  first sector number
+     *   [25:13] last sector number
+     */
+    uint32_t first = (part.permissions_and_location)       & 0x1FFFu;
+    uint32_t last  = (part.permissions_and_location >> 13) & 0x1FFFu;
+
+    *flash_offset = first * FLASH_SECTOR_SIZE;
+    *max_size     = (last - first + 1) * FLASH_SECTOR_SIZE;
+
+    printf("[ota] Target partition: flash 0x%08x – 0x%08x (%u KB)\n",
+           (unsigned)*flash_offset,
+           (unsigned)(*flash_offset + *max_size),
+           (unsigned)(*max_size / 1024));
+    return true;
+}
 
 /* ── Internal HTTPS client ───────────────────────────────────────────── */
 
@@ -117,9 +178,6 @@ static void   dns_found_cb(const char *name, const ip_addr_t *addr, void *arg);
 
 /* ── URL parsing ─────────────────────────────────────────────────────── */
 
-/**
- * Extract host, port, and path from an https:// URL.
- */
 static bool parse_url(const char *url, char *host, int host_len,
                       uint16_t *port, char *path, int path_len)
 {
@@ -132,7 +190,6 @@ static bool parse_url(const char *url, char *host, int host_len,
         return false;
     }
 
-    /* Host (up to '/', ':', or end) */
     const char *host_start = p;
     while (*p && *p != '/' && *p != ':') p++;
     int hlen = (int)(p - host_start);
@@ -140,7 +197,6 @@ static bool parse_url(const char *url, char *host, int host_len,
     memcpy(host, host_start, (size_t)hlen);
     host[hlen] = '\0';
 
-    /* Port */
     if (*p == ':') {
         p++;
         *port = (uint16_t)atoi(p);
@@ -149,7 +205,6 @@ static bool parse_url(const char *url, char *host, int host_len,
         *port = 443;
     }
 
-    /* Path */
     if (*p == '/') {
         int plen = (int)strlen(p);
         if (plen >= path_len) return false;
@@ -167,23 +222,17 @@ static bool parse_url(const char *url, char *host, int host_len,
 
 static int parse_status_code(const char *hdr)
 {
-    /* "HTTP/1.1 200 OK\r\n" */
     const char *p = strstr(hdr, " ");
     if (!p) return 0;
     return atoi(p + 1);
 }
 
-/**
- * Find a header value (case-insensitive key match).
- * Copies the value into buf (up to buf_len - 1 chars).
- */
 static bool find_header(const char *headers, const char *key,
                         char *buf, int buf_len)
 {
     int klen = (int)strlen(key);
     const char *p = headers;
     while (*p) {
-        /* Start of a line */
         if (strncasecmp(p, key, (size_t)klen) == 0 && p[klen] == ':') {
             p += klen + 1;
             while (*p == ' ') p++;
@@ -195,7 +244,6 @@ static bool find_header(const char *headers, const char *key,
             buf[vlen] = '\0';
             return true;
         }
-        /* Skip to next line */
         const char *nl = strstr(p, "\r\n");
         if (!nl) break;
         p = nl + 2;
@@ -209,7 +257,7 @@ static int find_content_length(const char *headers)
     if (find_header(headers, "Content-Length", val, sizeof(val))) {
         return atoi(val);
     }
-    return -1; /* unknown */
+    return -1;
 }
 
 /* ── Process received data (headers + body) ──────────────────────────── */
@@ -220,7 +268,6 @@ static void process_data(http_ctx_t *ctx, const uint8_t *data, int len)
 
     int offset = 0;
 
-    /* Still accumulating headers? */
     if (!ctx->headers_done) {
         while (offset < len) {
             if (ctx->hdr_len < (int)sizeof(ctx->hdr_buf) - 1) {
@@ -229,7 +276,6 @@ static void process_data(http_ctx_t *ctx, const uint8_t *data, int len)
             }
             offset++;
 
-            /* Check for end of headers */
             if (ctx->hdr_len >= 4 &&
                 memcmp(&ctx->hdr_buf[ctx->hdr_len - 4], "\r\n\r\n", 4) == 0) {
                 ctx->headers_done = true;
@@ -242,20 +288,17 @@ static void process_data(http_ctx_t *ctx, const uint8_t *data, int len)
         }
     }
 
-    /* Body data */
     if (ctx->headers_done && offset < len) {
         int body_chunk_len = len - offset;
         const uint8_t *body_data = data + offset;
 
         if (ctx->body_cb) {
-            /* Streaming mode */
             if (!ctx->body_cb(body_data, body_chunk_len, ctx->body_cb_ctx)) {
                 ctx->error = true;
                 return;
             }
         } else if (ctx->body_buf) {
-            /* Buffer mode */
-            int room = ctx->body_cap - ctx->body_len - 1; /* leave NUL */
+            int room = ctx->body_cap - ctx->body_len - 1;
             if (body_chunk_len > room) body_chunk_len = room;
             if (body_chunk_len > 0) {
                 memcpy(ctx->body_buf + ctx->body_len, body_data,
@@ -291,7 +334,6 @@ static err_t http_connected_cb(void *arg, struct altcp_pcb *pcb, err_t err)
         return ERR_OK;
     }
 
-    /* Build and send the HTTP request */
     char req[768];
     int n = snprintf(req, sizeof(req),
         "GET %s HTTP/1.1\r\n"
@@ -319,14 +361,12 @@ static err_t http_recv_cb(void *arg, struct altcp_pcb *pcb, struct pbuf *p,
     http_ctx_t *ctx = (http_ctx_t *)arg;
 
     if (!p || err != ERR_OK) {
-        /* Connection closed by server */
         ctx->complete = true;
         ctx->state = HTTP_COMPLETE;
         if (p) pbuf_free(p);
         return ERR_OK;
     }
 
-    /* Walk the pbuf chain */
     struct pbuf *q;
     for (q = p; q != NULL; q = q->next) {
         process_data(ctx, (const uint8_t *)q->payload, (int)q->len);
@@ -341,17 +381,13 @@ static void http_err_cb(void *arg, err_t err)
 {
     (void)err;
     http_ctx_t *ctx = (http_ctx_t *)arg;
-    ctx->pcb = NULL; /* lwIP freed the PCB already */
+    ctx->pcb = NULL;
     ctx->error = true;
     ctx->state = HTTP_ERROR;
 }
 
 /* ── Blocking HTTPS GET ──────────────────────────────────────────────── */
 
-/**
- * Perform a blocking HTTPS GET.  Spins the lwIP stack until the
- * request completes, errors out, or times out.
- */
 static bool https_get(http_ctx_t *ctx)
 {
     ctx->state = HTTP_DNS_WAIT;
@@ -365,18 +401,15 @@ static bool https_get(http_ctx_t *ctx)
     ctx->error = false;
     ctx->deadline = make_timeout_time_ms(HTTP_TIMEOUT_MS);
 
-    /* TLS config (no certificate verification for v1) */
     ctx->tls_cfg = altcp_tls_create_config_client(NULL, 0);
     if (!ctx->tls_cfg) {
         printf("[ota] TLS config allocation failed\n");
         return false;
     }
 
-    /* DNS lookup */
     err_t dns_err = dns_gethostbyname(ctx->host, &ctx->server_ip,
                                        dns_found_cb, ctx);
     if (dns_err == ERR_OK) {
-        /* Already cached */
         ctx->state = HTTP_CONNECTING;
     } else if (dns_err != ERR_INPROGRESS) {
         printf("[ota] DNS lookup failed: %d\n", dns_err);
@@ -384,7 +417,6 @@ static bool https_get(http_ctx_t *ctx)
         return false;
     }
 
-    /* Wait for DNS */
     while (ctx->state == HTTP_DNS_WAIT) {
         if (absolute_time_diff_us(get_absolute_time(), ctx->deadline) <= 0) {
             printf("[ota] DNS timeout\n");
@@ -399,7 +431,6 @@ static bool https_get(http_ctx_t *ctx)
         return false;
     }
 
-    /* Create TLS connection */
     ctx->pcb = altcp_tls_new(ctx->tls_cfg, IPADDR_TYPE_V4);
     if (!ctx->pcb) {
         printf("[ota] Failed to create TLS PCB\n");
@@ -407,14 +438,12 @@ static bool https_get(http_ctx_t *ctx)
         return false;
     }
 
-    /* Set SNI hostname for TLS */
     mbedtls_ssl_set_hostname(altcp_tls_context(ctx->pcb), ctx->host);
 
     altcp_arg(ctx->pcb, ctx);
     altcp_recv(ctx->pcb, http_recv_cb);
     altcp_err(ctx->pcb, http_err_cb);
 
-    /* Connect */
     err_t conn_err = altcp_connect(ctx->pcb, &ctx->server_ip, ctx->port,
                                     http_connected_cb);
     if (conn_err != ERR_OK) {
@@ -424,7 +453,6 @@ static bool https_get(http_ctx_t *ctx)
         return false;
     }
 
-    /* Spin until complete */
     while (!ctx->complete && !ctx->error) {
         if (absolute_time_diff_us(get_absolute_time(), ctx->deadline) <= 0) {
             printf("[ota] HTTP timeout\n");
@@ -439,7 +467,6 @@ static bool https_get(http_ctx_t *ctx)
         sleep_ms(1);
     }
 
-    /* Cleanup */
     if (ctx->pcb) {
         altcp_close(ctx->pcb);
         ctx->pcb = NULL;
@@ -449,9 +476,6 @@ static bool https_get(http_ctx_t *ctx)
     return !ctx->error;
 }
 
-/**
- * HTTPS GET with redirect following.
- */
 static bool https_get_follow(http_ctx_t *ctx, const char *url)
 {
     char current_url[512];
@@ -472,7 +496,6 @@ static bool https_get_follow(http_ctx_t *ctx, const char *url)
             printf("[ota] Redirect %d -> %s\n", ctx->status_code,
                    ctx->location);
             snprintf(current_url, sizeof(current_url), "%s", ctx->location);
-            /* Reset body for the next request */
             ctx->body_len = 0;
             continue;
         }
@@ -484,20 +507,14 @@ static bool https_get_follow(http_ctx_t *ctx, const char *url)
 
 /* ── GitHub release JSON parsing ─────────────────────────────────────── */
 
-/**
- * Extract a JSON string value by key.  Minimal parser — just finds
- * "key":"value" and copies value into buf.
- */
 static bool json_find_string(const char *json, const char *key,
                              char *buf, int buf_len)
 {
-    /* Build search pattern: "key":" */
     char pattern[128];
     snprintf(pattern, sizeof(pattern), "\"%s\":\"", key);
 
     const char *p = strstr(json, pattern);
     if (!p) {
-        /* Try with space after colon: "key": " */
         snprintf(pattern, sizeof(pattern), "\"%s\": \"", key);
         p = strstr(json, pattern);
         if (!p) return false;
@@ -514,29 +531,17 @@ static bool json_find_string(const char *json, const char *key,
     return true;
 }
 
-/**
- * Find the browser_download_url for an asset named "padproxy.bin"
- * in the GitHub releases JSON.
- */
 static bool find_bin_asset_url(const char *json, char *url_buf, int url_len)
 {
-    /* Look for "padproxy.bin" in the assets array, then find its
-     * browser_download_url. The JSON structure is:
-     *   "assets":[{..."name":"padproxy.bin",...
-     *     "browser_download_url":"https://..."}]
-     */
     const char *asset = strstr(json, "\"padproxy.bin\"");
     if (!asset) return false;
 
-    /* The browser_download_url should appear nearby (same object) */
-    const char *search_start = asset;
-    const char *url_key = strstr(search_start, "\"browser_download_url\":\"");
+    const char *url_key = strstr(asset, "\"browser_download_url\":\"");
     if (!url_key) {
-        url_key = strstr(search_start, "\"browser_download_url\": \"");
+        url_key = strstr(asset, "\"browser_download_url\": \"");
         if (!url_key) return false;
     }
 
-    /* Skip to the value */
     const char *val = strchr(url_key + 1, ':');
     if (!val) return false;
     val++;
@@ -554,115 +559,72 @@ static bool find_bin_asset_url(const char *json, char *url_buf, int url_len)
     return true;
 }
 
-/* ── Flash operations ────────────────────────────────────────────────── */
+/* ── Flash writer (streams download to target partition) ─────────────── */
 
 typedef struct {
-    uint32_t flash_offset;     /* Current write offset in flash */
-    uint8_t  sector_buf[FLASH_SECTOR_SZ];
-    int      sector_pos;       /* Bytes buffered in sector_buf */
+    uint32_t flash_offset;     /* Current write position in flash */
+    uint32_t partition_end;    /* Do not write past this offset */
+    uint8_t  sector_buf[FLASH_SECTOR_SIZE];
+    int      sector_pos;
     uint32_t total_written;
     bool     error;
 } flash_writer_t;
 
-static void flash_writer_init(flash_writer_t *fw, uint32_t start_offset)
+static void flash_writer_init(flash_writer_t *fw,
+                               uint32_t start_offset, uint32_t max_size)
 {
-    fw->flash_offset = start_offset;
-    fw->sector_pos = 0;
+    fw->flash_offset  = start_offset;
+    fw->partition_end = start_offset + max_size;
+    fw->sector_pos    = 0;
     fw->total_written = 0;
-    fw->error = false;
+    fw->error         = false;
 }
 
-/**
- * Flush the current sector buffer to flash.
- * Erases the sector, then programs it page by page.
- */
 static bool flash_writer_flush(flash_writer_t *fw)
 {
     if (fw->sector_pos == 0) return true;
 
-    /* Pad remainder of sector with 0xFF (erased state) */
-    if (fw->sector_pos < FLASH_SECTOR_SZ) {
+    if (fw->flash_offset + FLASH_SECTOR_SIZE > fw->partition_end) {
+        printf("[ota] Partition full\n");
+        return false;
+    }
+
+    /* Pad remainder with 0xFF (erased state) */
+    if (fw->sector_pos < (int)FLASH_SECTOR_SIZE) {
         memset(fw->sector_buf + fw->sector_pos, 0xFF,
-               (size_t)(FLASH_SECTOR_SZ - fw->sector_pos));
+               FLASH_SECTOR_SIZE - (size_t)fw->sector_pos);
     }
 
     uint32_t ints = save_and_disable_interrupts();
-    flash_range_erase(fw->flash_offset, FLASH_SECTOR_SZ);
-    flash_range_program(fw->flash_offset, fw->sector_buf, FLASH_SECTOR_SZ);
+    flash_range_erase(fw->flash_offset, FLASH_SECTOR_SIZE);
+    flash_range_program(fw->flash_offset, fw->sector_buf, FLASH_SECTOR_SIZE);
     restore_interrupts(ints);
 
-    fw->flash_offset += FLASH_SECTOR_SZ;
+    fw->flash_offset += FLASH_SECTOR_SIZE;
     fw->sector_pos = 0;
     return true;
 }
 
-/**
- * Streaming callback: write incoming firmware data to flash staging area.
- */
 static bool flash_write_cb(const uint8_t *data, int len, void *ctx)
 {
     flash_writer_t *fw = (flash_writer_t *)ctx;
 
-    if (fw->total_written + (uint32_t)len > OTA_MAX_IMAGE_SIZE) {
-        printf("[ota] Firmware too large\n");
-        fw->error = true;
-        return false;
-    }
-
     int offset = 0;
     while (offset < len) {
-        int room = FLASH_SECTOR_SZ - fw->sector_pos;
+        int room = (int)FLASH_SECTOR_SIZE - fw->sector_pos;
         int chunk = (len - offset < room) ? (len - offset) : room;
         memcpy(fw->sector_buf + fw->sector_pos, data + offset, (size_t)chunk);
         fw->sector_pos += chunk;
         fw->total_written += (uint32_t)chunk;
         offset += chunk;
 
-        if (fw->sector_pos == FLASH_SECTOR_SZ) {
+        if (fw->sector_pos == (int)FLASH_SECTOR_SIZE) {
             if (!flash_writer_flush(fw)) {
                 fw->error = true;
                 return false;
             }
         }
     }
-    return true;
-}
-
-/**
- * Copy the staging image to the active application area.
- * Runs with interrupts disabled since we're overwriting running code.
- */
-static bool flash_apply_update(uint32_t image_size)
-{
-    printf("[ota] Applying update (%u bytes)...\n", (unsigned)image_size);
-
-    /* Round up to sector boundary */
-    uint32_t sectors = (image_size + FLASH_SECTOR_SZ - 1) / FLASH_SECTOR_SZ;
-    uint32_t copy_size = sectors * FLASH_SECTOR_SZ;
-
-    /*
-     * Read from staging, erase+program active area, one sector at a time.
-     * The flash read uses XIP (memory-mapped), erase/program use ROM routines.
-     */
-    uint8_t buf[FLASH_SECTOR_SZ];
-    const uint8_t *staging = (const uint8_t *)(XIP_BASE + OTA_STAGING_OFFSET);
-
-    for (uint32_t off = 0; off < copy_size; off += FLASH_SECTOR_SZ) {
-        /* Read from staging via XIP */
-        memcpy(buf, staging + off, FLASH_SECTOR_SZ);
-
-        /* Write to active area */
-        uint32_t ints = save_and_disable_interrupts();
-        flash_range_erase(off, FLASH_SECTOR_SZ);
-        flash_range_program(off, buf, FLASH_SECTOR_SZ);
-        restore_interrupts(ints);
-
-        if ((off % (64 * 1024)) == 0) {
-            printf("[ota] Flashed %u / %u KB\n",
-                   (unsigned)(off / 1024), (unsigned)(copy_size / 1024));
-        }
-    }
-
     return true;
 }
 
@@ -704,6 +666,14 @@ ota_update_result_t ota_update_check_and_apply(void)
     char ver_str[16];
     ota_version_format(&OTA_CURRENT_VERSION, ver_str, sizeof(ver_str));
     printf("[ota] Current firmware version: %s\n", ver_str);
+
+    /* Discover which partition the boot ROM wants us to update */
+    uint32_t target_offset, target_size;
+    if (!find_target_partition(&target_offset, &target_size)) {
+        printf("[ota] No A/B partition table found — "
+               "flash partition_table.json with picotool first\n");
+        return OTA_RESULT_ERROR_FLASH;
+    }
 
     /* Initialize CYW43 for WiFi */
     if (cyw43_arch_init()) {
@@ -777,9 +747,9 @@ ota_update_result_t ota_update_check_and_apply(void)
 
     printf("[ota] Downloading %s\n", bin_url);
 
-    /* Step 4: Download firmware to staging flash */
+    /* Step 4: Download firmware to target partition */
     flash_writer_t fw;
-    flash_writer_init(&fw, OTA_STAGING_OFFSET);
+    flash_writer_init(&fw, target_offset, target_size);
 
     memset(&http_ctx, 0, sizeof(http_ctx));
     http_ctx.body_cb = flash_write_cb;
@@ -804,8 +774,8 @@ ota_update_result_t ota_update_check_and_apply(void)
         goto cleanup;
     }
 
-    printf("[ota] Downloaded %u bytes to staging\n",
-           (unsigned)fw.total_written);
+    printf("[ota] Downloaded %u bytes to partition at 0x%08x\n",
+           (unsigned)fw.total_written, (unsigned)target_offset);
 
     if (fw.total_written == 0) {
         printf("[ota] Empty firmware image\n");
@@ -813,22 +783,26 @@ ota_update_result_t ota_update_check_and_apply(void)
         goto cleanup;
     }
 
-    /* Step 5: Disconnect WiFi before flashing */
+    /* Step 5: Disconnect WiFi before rebooting */
     wifi_disconnect();
+    cyw43_arch_deinit();
 
-    /* Step 6: Copy staging -> active */
-    if (!flash_apply_update(fw.total_written)) {
-        printf("[ota] Flash apply failed\n");
-        result = OTA_RESULT_ERROR_FLASH;
-        goto cleanup;
-    }
-
-    printf("[ota] Update applied! Rebooting...\n");
+    /* Step 6: Reboot into the new image via FLASH_UPDATE.
+     *
+     * The boot ROM will execute the new partition in TBYB mode.
+     * On next boot, rom_explicit_buy() in main() accepts it.
+     * If the new image crashes, the boot ROM falls back to this
+     * partition automatically.
+     */
+    printf("[ota] Rebooting into new firmware (TBYB)...\n");
     sleep_ms(100); /* Let UART drain */
-    watchdog_reboot(0, 0, 0);
+
+    rom_reboot(REBOOT2_FLAG_REBOOT_TYPE_FLASH_UPDATE,
+               200, /* delay ms */
+               XIP_BASE + target_offset, 0);
 
     /* Should not reach here */
-    result = OTA_RESULT_UPDATE_APPLIED;
+    return OTA_RESULT_UPDATE_APPLIED;
 
 cleanup:
     wifi_disconnect();

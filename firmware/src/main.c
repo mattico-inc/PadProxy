@@ -154,6 +154,11 @@ int main(void)
     stdio_init_all();
     printf("[padproxy] PadProxy starting\n");
 
+    /* Accept this image immediately so the boot ROM does not roll back
+     * a TBYB (Try Before You Buy) flash-update boot.  Must happen
+     * within ~16.7 s of reset — do it first thing. */
+    ota_accept_current_image();
+
     /* Check for OTA firmware update over WiFi (before BT init).
      * Uses the CYW43 radio for WiFi, then deinits so Bluepad32 can
      * reinitialize it for Bluetooth.  Skipped instantly if no WiFi

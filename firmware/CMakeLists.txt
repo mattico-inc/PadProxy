@@ -70,6 +70,9 @@ target_compile_definitions(padproxy PRIVATE
     PADPROXY_VERSION_MAJOR=${PADPROXY_VERSION_MAJOR}
     PADPROXY_VERSION_MINOR=${PADPROXY_VERSION_MINOR}
     PADPROXY_VERSION_PATCH=${PADPROXY_VERSION_PATCH}
+    # Mark this image as "Try Before You Buy" — the boot ROM will roll
+    # back to the previous partition unless rom_explicit_buy() is called.
+    PICO_CRT0_IMAGE_TYPE_TBYB=1
 )
 
 target_link_libraries(padproxy
@@ -80,6 +83,7 @@ target_link_libraries(padproxy
     pico_cyw43_arch_threadsafe_background
     pico_lwip_mbedtls
     pico_lwip_http
+    pico_bootrom
     bluepad32
 )
 
