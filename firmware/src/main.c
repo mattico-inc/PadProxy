@@ -9,6 +9,7 @@
 #include "usb_hid_gamepad.h"
 #include "pc_power_state.h"
 #include "pc_power_hal.h"
+#include "ota_update.h"
 
 /* ── Shared state ────────────────────────────────────────────────────── */
 
@@ -152,6 +153,13 @@ int main(void)
 {
     stdio_init_all();
     printf("[padproxy] PadProxy starting\n");
+
+    /* Check for OTA firmware update over WiFi (before BT init).
+     * Uses the CYW43 radio for WiFi, then deinits so Bluepad32 can
+     * reinitialize it for Bluetooth.  Skipped instantly if no WiFi
+     * SSID is configured at compile time. */
+    ota_update_result_t ota = ota_update_check_and_apply();
+    printf("[padproxy] OTA check result: %s\n", ota_update_result_name(ota));
 
     /* Initialize power management */
     pc_power_hal_init();
