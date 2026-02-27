@@ -61,7 +61,7 @@ $(BLUEPAD32_DIR):
 
 $(PICO_SDK_DIR):
 	git clone --branch $(PICO_SDK_TAG) --depth 1 https://github.com/raspberrypi/pico-sdk.git $(PICO_SDK_DIR)
-	cd $(PICO_SDK_DIR) && git submodule update --init
+	cd $(PICO_SDK_DIR) && git submodule update --init --recursive
 
 # ── Firmware (cross-compile for RP2350) ──────────────────────────────────
 
