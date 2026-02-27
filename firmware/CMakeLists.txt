@@ -29,6 +29,16 @@ set(CMAKE_C_STANDARD 11)
 
 pico_sdk_init()
 
+# ── BTstack ────────────────────────────────────────────────────────────
+# Use BTstack bundled with Pico SDK.  btstack_config.h and sdkconfig.h
+# live in src/ — use include_directories() (global) so the bluepad32
+# library target can find them too.
+set(BTSTACK_ROOT ${PICO_SDK_PATH}/lib/btstack)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src)
+include_directories(${BTSTACK_ROOT}/3rd-party/bluedroid/encoder/include)
+include_directories(${BTSTACK_ROOT}/3rd-party/bluedroid/decoder/include)
+include_directories(${BTSTACK_ROOT}/src)
+
 # ── Bluepad32 ────────────────────────────────────────────────────────────
 # Clone into lib/bluepad32, or pass -DBLUEPAD32_ROOT=/path/to/bluepad32
 set(BLUEPAD32_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/lib/bluepad32
@@ -79,6 +89,7 @@ target_link_libraries(padproxy
     pico_stdlib
     pico_sync
     tinyusb_device
+    pico_btstack_classic
     pico_btstack_cyw43
     pico_cyw43_arch_threadsafe_background
     pico_lwip_mbedtls
