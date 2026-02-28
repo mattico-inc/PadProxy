@@ -19,12 +19,6 @@
 
 /* ── Compile-time configuration ──────────────────────────────────────── */
 
-#ifndef WIFI_SSID
-#define WIFI_SSID ""
-#endif
-#ifndef WIFI_PASSWORD
-#define WIFI_PASSWORD ""
-#endif
 #ifndef GITHUB_OTA_OWNER
 #define GITHUB_OTA_OWNER "mattico-inc"
 #endif
@@ -630,13 +624,13 @@ static bool flash_write_cb(const uint8_t *data, int len, void *ctx)
 
 /* ── WiFi helpers ────────────────────────────────────────────────────── */
 
-static bool wifi_connect(void)
+static bool wifi_connect(const ota_wifi_creds_t *creds)
 {
-    printf("[ota] Connecting to WiFi '%s'...\n", WIFI_SSID);
+    printf("[ota] Connecting to WiFi '%s'...\n", creds->ssid);
     cyw43_arch_enable_sta_mode();
 
     int err = cyw43_arch_wifi_connect_timeout_ms(
-        WIFI_SSID, WIFI_PASSWORD, CYW43_AUTH_WPA2_AES_PSK,
+        creds->ssid, creds->password, CYW43_AUTH_WPA2_AES_PSK,
         WIFI_CONNECT_TIMEOUT_MS);
 
     if (err != 0) {
@@ -655,10 +649,10 @@ static void wifi_disconnect(void)
 
 /* ── Public API ──────────────────────────────────────────────────────── */
 
-ota_update_result_t ota_update_check_and_apply(void)
+ota_update_result_t ota_update_check_and_apply(const ota_wifi_creds_t *creds)
 {
-    /* Skip if WiFi not configured */
-    if (strlen(WIFI_SSID) == 0) {
+    /* Skip if no credentials or empty SSID */
+    if (!creds || !creds->ssid || strlen(creds->ssid) == 0) {
         printf("[ota] No WiFi SSID configured, skipping update check\n");
         return OTA_RESULT_ERROR_NO_WIFI_CONFIG;
     }
@@ -681,7 +675,7 @@ ota_update_result_t ota_update_check_and_apply(void)
         return OTA_RESULT_ERROR_WIFI;
     }
 
-    if (!wifi_connect()) {
+    if (!wifi_connect(creds)) {
         cyw43_arch_deinit();
         return OTA_RESULT_ERROR_WIFI;
     }

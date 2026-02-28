@@ -14,6 +14,15 @@
 #include "device_config.h"
 #include "setup_cmd.h"
 
+/* ── Compile-time WiFi fallback ──────────────────────────────────────── */
+
+#ifndef WIFI_SSID
+#define WIFI_SSID ""
+#endif
+#ifndef WIFI_PASSWORD
+#define WIFI_PASSWORD ""
+#endif
+
 /* ── Shared state ────────────────────────────────────────────────────── */
 
 static pc_power_sm_t s_power_sm;
@@ -36,9 +45,6 @@ static uint8_t s_cdc_line_pos;
 
 /* ── Action dispatch ─────────────────────────────────────────────────── */
 
-#define POWER_PULSE_MS      200
-#define BOOT_TIMEOUT_MS     30000
-
 /**
  * How long the power LED must remain in a new state (on or off) before
  * the state machine sees the change.  Filters out motherboard sleep-mode
@@ -49,15 +55,17 @@ static uint8_t s_cdc_line_pos;
 
 /**
  * Execute hardware actions requested by a power state machine transition.
+ * Timing values come from the runtime device config.
  */
 static void dispatch_actions(uint32_t actions)
 {
     if (actions & PC_ACTION_TRIGGER_POWER) {
-        printf("[padproxy] Triggering power button (%d ms)\n", POWER_PULSE_MS);
-        pc_power_hal_trigger_power_button(POWER_PULSE_MS);
+        printf("[padproxy] Triggering power button (%u ms)\n",
+               s_config.power_pulse_ms);
+        pc_power_hal_trigger_power_button(s_config.power_pulse_ms);
     }
     if (actions & PC_ACTION_START_BOOT_TIMER) {
-        pc_power_hal_start_boot_timer(BOOT_TIMEOUT_MS);
+        pc_power_hal_start_boot_timer(s_config.boot_timeout_ms);
     }
     if (actions & PC_ACTION_CANCEL_BOOT_TIMER) {
         pc_power_hal_cancel_boot_timer();
@@ -239,16 +247,50 @@ int main(void)
      * within ~16.7 s of reset — do it first thing. */
     ota_accept_current_image();
 
+    /* Load device config before OTA so WiFi credentials are available.
+     * Falls back to compiled-in defaults on first boot or flash error. */
+    device_config_init(&s_config);
+    /* TODO: attempt device_config_deserialize() from flash sector */
+
+    /* Build WiFi credentials: prefer runtime config, fall back to
+     * compile-time defines (which may be empty). */
+    ota_wifi_creds_t wifi_creds;
+    if (s_config.wifi_ssid[0] != '\0') {
+        wifi_creds.ssid     = s_config.wifi_ssid;
+        wifi_creds.password = s_config.wifi_password;
+    } else {
+        wifi_creds.ssid     = WIFI_SSID;
+        wifi_creds.password = WIFI_PASSWORD;
+    }
+
     /* Check for OTA firmware update over WiFi (before BT init).
      * Uses the CYW43 radio for WiFi, then deinits so Bluepad32 can
      * reinitialize it for Bluetooth.  Skipped instantly if no WiFi
-     * SSID is configured at compile time. */
-    ota_update_result_t ota = ota_update_check_and_apply();
+     * SSID is configured. */
+    ota_update_result_t ota = ota_update_check_and_apply(&wifi_creds);
     printf("[padproxy] OTA check result: %s\n", ota_update_result_name(ota));
 
-    /* Load device config (defaults until flash persistence is wired up) */
-    device_config_init(&s_config);
-    /* TODO: attempt device_config_deserialize() from flash sector */
+    /*
+     * TODO: USB firmware update support
+     *
+     * In addition to WiFi OTA, support firmware updates over the CDC
+     * serial interface.  This would let users flash new firmware via
+     * the Web Serial setup page without needing WiFi configured.
+     *
+     * Approach: add a "firmware" command to setup_cmd that:
+     *   1. Accepts a binary size ("firmware <nbytes>")
+     *   2. Switches CDC to binary receive mode
+     *   3. Streams the .bin payload into the inactive flash partition
+     *      (reusing the flash_writer from ota_update.c)
+     *   4. On completion, verifies CRC and issues a TBYB reboot
+     *
+     * The Web Serial page would read a local .bin file and stream it
+     * over the CDC serial port using the Web Serial API's WritableStream.
+     *
+     * This makes the device fully configurable and updatable over USB
+     * with zero WiFi dependency — WiFi becomes optional (for automatic
+     * background OTA checks only).
+     */
 
     /* Setup command handler version string */
     static char version_str[20];
