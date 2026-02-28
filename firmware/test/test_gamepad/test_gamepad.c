@@ -224,7 +224,7 @@ void test_hid_report_zeroed_input(void)
 
 void test_hid_descriptor_not_empty(void)
 {
-    TEST_ASSERT_GREATER_THAN(0, usb_hid_report_descriptor_len);
+    TEST_ASSERT_GREATER_THAN(0, USB_HID_REPORT_DESCRIPTOR_LEN);
 }
 
 void test_hid_descriptor_starts_with_usage_page(void)
@@ -238,7 +238,7 @@ void test_hid_descriptor_ends_with_end_collection(void)
 {
     /* 0xC0 = End Collection */
     TEST_ASSERT_EQUAL_HEX8(0xC0,
-        usb_hid_report_descriptor[usb_hid_report_descriptor_len - 1]);
+        usb_hid_report_descriptor[USB_HID_REPORT_DESCRIPTOR_LEN - 1]);
 }
 
 void test_hid_report_struct_is_13_bytes(void)

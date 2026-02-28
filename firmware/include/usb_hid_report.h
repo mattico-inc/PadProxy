@@ -54,10 +54,10 @@ typedef struct __attribute__((packed)) {
 void usb_hid_report_from_gamepad(const gamepad_report_t *in,
                                   usb_gamepad_report_t *out);
 
-/** Size of the HID report descriptor in bytes. */
-extern const uint16_t usb_hid_report_descriptor_len;
+/** Size of the HID report descriptor in bytes (compile-time constant). */
+#define USB_HID_REPORT_DESCRIPTOR_LEN 91
 
 /** The HID report descriptor. */
-extern const uint8_t usb_hid_report_descriptor[];
+extern const uint8_t usb_hid_report_descriptor[USB_HID_REPORT_DESCRIPTOR_LEN];
 
 #endif /* USB_HID_REPORT_H */
