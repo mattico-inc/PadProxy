@@ -13,7 +13,7 @@
  * This descriptor is designed for broad OS compatibility (Windows DirectInput,
  * Linux evdev, macOS IOKit) without requiring custom drivers.
  */
-const uint8_t usb_hid_report_descriptor[] = {
+const uint8_t usb_hid_report_descriptor[USB_HID_REPORT_DESCRIPTOR_LEN] = {
     0x05, 0x01,        /* Usage Page (Generic Desktop) */
     0x09, 0x05,        /* Usage (Gamepad) */
     0xA1, 0x01,        /* Collection (Application) */
@@ -73,7 +73,6 @@ const uint8_t usb_hid_report_descriptor[] = {
     0xC0,              /* End Collection */
 };
 
-const uint16_t usb_hid_report_descriptor_len = sizeof(usb_hid_report_descriptor);
 
 void usb_hid_report_from_gamepad(const gamepad_report_t *in,
                                   usb_gamepad_report_t *out)
