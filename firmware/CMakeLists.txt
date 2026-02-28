@@ -29,15 +29,16 @@ set(CMAKE_C_STANDARD 11)
 
 pico_sdk_init()
 
-# ── BTstack ────────────────────────────────────────────────────────────
-# Use BTstack bundled with Pico SDK.  btstack_config.h and sdkconfig.h
-# live in src/ — use include_directories() (global) so the bluepad32
-# library target can find them too.
+# ── BTstack & Mbed TLS ─────────────────────────────────────────────────
+# btstack_config.h, sdkconfig.h, lwipopts.h, and mbedtls_config.h live
+# in src/ — use include_directories() (global) so the bluepad32 library
+# target and Pico SDK libraries can find them.
 set(BTSTACK_ROOT ${PICO_SDK_PATH}/lib/btstack)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src)
 include_directories(${BTSTACK_ROOT}/3rd-party/bluedroid/encoder/include)
 include_directories(${BTSTACK_ROOT}/3rd-party/bluedroid/decoder/include)
 include_directories(${BTSTACK_ROOT}/src)
+include_directories(${PICO_SDK_PATH}/lib/mbedtls/include)
 
 # ── Bluepad32 ────────────────────────────────────────────────────────────
 # Clone into lib/bluepad32, or pass -DBLUEPAD32_ROOT=/path/to/bluepad32
