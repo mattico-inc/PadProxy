@@ -11,6 +11,7 @@
 #include "hardware/flash.h"
 #include "hardware/sync.h"
 #include "boot/picobin.h"
+#include "boot/uf2.h"
 
 #include "lwip/tcp.h"
 #include "lwip/dns.h"
@@ -797,7 +798,7 @@ ota_update_result_t ota_update_check_and_apply(void)
     printf("[ota] Rebooting into new firmware (TBYB)...\n");
     sleep_ms(100); /* Let UART drain */
 
-    rom_reboot(REBOOT2_FLAG_REBOOT_TYPE_FLASH_UPDATE,
+    rom_reboot(BOOT_TYPE_FLASH_UPDATE,
                200, /* delay ms */
                XIP_BASE + target_offset, 0);
 
