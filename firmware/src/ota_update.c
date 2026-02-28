@@ -11,7 +11,6 @@
 #include "hardware/flash.h"
 #include "hardware/sync.h"
 #include "boot/picobin.h"
-#include "boot/uf2.h"
 
 #include "lwip/tcp.h"
 #include "lwip/dns.h"
