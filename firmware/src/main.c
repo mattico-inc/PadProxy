@@ -3,6 +3,7 @@
 
 #include "pico/stdlib.h"
 #include "pico/time.h"
+#include "tusb.h"
 
 #include "gamepad.h"
 #include "bt_gamepad.h"
@@ -10,10 +11,13 @@
 #include "pc_power_state.h"
 #include "pc_power_hal.h"
 #include "ota_update.h"
+#include "device_config.h"
+#include "setup_cmd.h"
 
 /* ── Shared state ────────────────────────────────────────────────────── */
 
 static pc_power_sm_t s_power_sm;
+static device_config_t s_config;
 
 /**
  * Previous gamepad report, used to detect edges (e.g. guide button press).
@@ -22,6 +26,13 @@ static pc_power_sm_t s_power_sm;
  */
 static gamepad_report_t s_prev_report;
 static bool s_prev_report_valid;
+
+/* ── CDC setup serial ───────────────────────────────────────────────── */
+
+#define CDC_LINE_MAX 256
+
+static char    s_cdc_line[CDC_LINE_MAX];
+static uint8_t s_cdc_line_pos;
 
 /* ── Action dispatch ─────────────────────────────────────────────────── */
 
@@ -137,6 +148,51 @@ static void poll_hardware(uint32_t now_ms)
     }
 }
 
+/* ── CDC setup serial ─────────────────────────────────────────────── */
+
+/**
+ * Poll the CDC serial interface for complete lines and process them
+ * through the setup command handler.
+ */
+static void poll_cdc_setup(void)
+{
+    while (tud_cdc_available()) {
+        int ch = tud_cdc_read_char();
+        if (ch < 0) break;
+
+        if (ch == '\n' || ch == '\r') {
+            if (s_cdc_line_pos == 0)
+                continue;  /* skip empty lines / lone CR or LF */
+
+            s_cdc_line[s_cdc_line_pos] = '\0';
+
+            char response[512];
+            setup_cmd_result_t r = setup_cmd_process(
+                s_cdc_line, &s_config, response, sizeof(response));
+
+            if (r.out_len > 0) {
+                tud_cdc_write(response, (uint32_t)r.out_len);
+                tud_cdc_write_flush();
+            }
+
+            if (r.action == SETUP_ACTION_SAVE) {
+                printf("[setup] Saving config to flash\n");
+                /* TODO: persist s_config to flash sector */
+            } else if (r.action == SETUP_ACTION_REBOOT) {
+                printf("[setup] Rebooting...\n");
+                tud_cdc_write_flush();
+                sleep_ms(100);
+                /* TODO: watchdog_reboot() or rom reboot */
+            }
+
+            s_cdc_line_pos = 0;
+        } else if (s_cdc_line_pos < CDC_LINE_MAX - 1) {
+            s_cdc_line[s_cdc_line_pos++] = (char)ch;
+        }
+        /* else: line too long, silently drop excess characters */
+    }
+}
+
 /* ── Main loop ───────────────────────────────────────────────────────── */
 
 /**
@@ -190,6 +246,17 @@ int main(void)
     ota_update_result_t ota = ota_update_check_and_apply();
     printf("[padproxy] OTA check result: %s\n", ota_update_result_name(ota));
 
+    /* Load device config (defaults until flash persistence is wired up) */
+    device_config_init(&s_config);
+    /* TODO: attempt device_config_deserialize() from flash sector */
+
+    /* Setup command handler version string */
+    static char version_str[20];
+    snprintf(version_str, sizeof(version_str), "%d.%d.%d",
+             PADPROXY_VERSION_MAJOR, PADPROXY_VERSION_MINOR,
+             PADPROXY_VERSION_PATCH);
+    setup_cmd_set_version(version_str);
+
     /* Initialize power management */
     pc_power_hal_init();
     pc_power_sm_init(&s_power_sm);
@@ -197,7 +264,7 @@ int main(void)
     s_led_debounced = s_led_reading;
     s_led_changed_ms = 0;
 
-    /* Initialize USB HID gamepad (must be before BT so USB is ready) */
+    /* Initialize USB HID gamepad + CDC setup serial */
     usb_hid_gamepad_init(on_usb_state_change);
 
     /* Initialize Bluetooth gamepad */
@@ -205,12 +272,22 @@ int main(void)
 
     printf("[padproxy] Initialization complete, entering main loop\n");
 
+    /* Update status string for setup command handler */
+    static char status_buf[64];
+
     /* Main loop: poll BT → proxy to USB, poll hardware → power SM */
     for (;;) {
         uint32_t now_ms = pc_power_hal_millis();
 
         /* Service USB stack */
         usb_hid_gamepad_task();
+
+        /* Poll CDC setup serial */
+        snprintf(status_buf, sizeof(status_buf), "pc_state=%s bt_connected=%s",
+                 pc_power_state_name(pc_power_sm_get_state(&s_power_sm)),
+                 bt_gamepad_get_report(0, NULL) ? "true" : "false");
+        setup_cmd_set_status(status_buf);
+        poll_cdc_setup();
 
         /* Poll hardware inputs (power LED, boot timer) */
         poll_hardware(now_ms);
