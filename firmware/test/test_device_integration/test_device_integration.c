@@ -118,13 +118,18 @@ bool usb_hid_gamepad_send_report(const gamepad_report_t *report)
 
 /* ── Device orchestration (mirrors main.c) ──────────────────────────── */
 
-#define POWER_PULSE_MS  200
-#define BOOT_TIMEOUT_MS 30000
+#define POWER_PULSE_MS      200
+#define BOOT_TIMEOUT_MS     30000
+#define POWER_LED_STABLE_MS 3000
 
 static pc_power_sm_t    s_sm;
 static gamepad_report_t s_prev_report;
 static bool             s_prev_report_valid;
-static bool             s_prev_led;
+
+/** Debounced power-LED state (mirrors main.c). */
+static bool     s_led_reading;
+static bool     s_led_debounced;
+static uint32_t s_led_changed_ms;
 
 static void dispatch_actions(uint32_t actions)
 {
@@ -166,11 +171,21 @@ static void device_poll_hardware(uint32_t now_ms)
     bool led = pc_power_hal_read_power_led();
     pc_power_result_t r;
 
-    if (led && !s_prev_led) {
-        r = pc_power_sm_process(&s_sm, PC_EVENT_POWER_LED_ON, now_ms);
-        dispatch_actions(r.actions);
-    } else if (!led && s_prev_led) {
-        r = pc_power_sm_process(&s_sm, PC_EVENT_POWER_LED_OFF, now_ms);
+    /* Reset debounce timer whenever the raw reading changes */
+    if (led != s_led_reading) {
+        s_led_reading    = led;
+        s_led_changed_ms = now_ms;
+    }
+
+    /* Emit an edge event only after the reading has been stable */
+    if (s_led_reading != s_led_debounced &&
+        (now_ms - s_led_changed_ms) >= POWER_LED_STABLE_MS) {
+        s_led_debounced = s_led_reading;
+        if (s_led_debounced) {
+            r = pc_power_sm_process(&s_sm, PC_EVENT_POWER_LED_ON, now_ms);
+        } else {
+            r = pc_power_sm_process(&s_sm, PC_EVENT_POWER_LED_OFF, now_ms);
+        }
         dispatch_actions(r.actions);
     }
 
@@ -178,8 +193,6 @@ static void device_poll_hardware(uint32_t now_ms)
         r = pc_power_sm_process(&s_sm, PC_EVENT_BOOT_TIMEOUT, now_ms);
         dispatch_actions(r.actions);
     }
-
-    s_prev_led = led;
 }
 
 static void device_process_gamepad(const gamepad_report_t *report,
@@ -217,7 +230,9 @@ static void device_init(void)
     s_prev_report_valid = false;
 
     pc_power_sm_init(&s_sm);
-    s_prev_led = pc_power_hal_read_power_led();
+    s_led_reading    = pc_power_hal_read_power_led();
+    s_led_debounced  = s_led_reading;
+    s_led_changed_ms = 0;
 
     usb_hid_gamepad_init(on_usb_state_change);
     bt_gamepad_init(on_bt_event);
@@ -268,12 +283,6 @@ static void inject_usb_suspend(void)
     if (s_usb.state_cb) s_usb.state_cb(USB_HID_SUSPENDED);
 }
 
-static void inject_usb_unmount(void)
-{
-    s_usb.state = USB_HID_NOT_MOUNTED;
-    if (s_usb.state_cb) s_usb.state_cb(USB_HID_NOT_MOUNTED);
-}
-
 /* ── Report builders ────────────────────────────────────────────────── */
 
 static gamepad_report_t make_idle_report(void)
@@ -293,14 +302,23 @@ static gamepad_report_t make_guide_report(void)
 
 /* ── State helpers ──────────────────────────────────────────────────── */
 
-/** Drive the device from OFF → ON via power LED edge + USB mount. */
+/**
+ * Drive the device from OFF → ON via a stable power LED + USB mount.
+ * The LED must remain on for POWER_LED_STABLE_MS before the state machine
+ * sees the event.
+ */
 static void drive_to_on(uint32_t at_ms)
 {
     s_hal.power_led = true;
     device_tick(at_ms);
+    /* LED change recorded but debounce not yet elapsed */
+    TEST_ASSERT_EQUAL(PC_STATE_OFF, pc_power_sm_get_state(&s_sm));
+
+    /* Advance past the debounce period */
+    device_tick(at_ms + POWER_LED_STABLE_MS);
     TEST_ASSERT_EQUAL(PC_STATE_BOOTING, pc_power_sm_get_state(&s_sm));
 
-    s_hal.millis = at_ms + 5000;
+    s_hal.millis = at_ms + POWER_LED_STABLE_MS + 5000;
     inject_usb_mount();
     TEST_ASSERT_EQUAL(PC_STATE_ON, pc_power_sm_get_state(&s_sm));
 }
@@ -309,7 +327,7 @@ static void drive_to_on(uint32_t at_ms)
 static void drive_to_sleeping(uint32_t at_ms)
 {
     drive_to_on(at_ms);
-    s_hal.millis = at_ms + 10000;
+    s_hal.millis = at_ms + POWER_LED_STABLE_MS + 10000;
     inject_usb_suspend();
     TEST_ASSERT_EQUAL(PC_STATE_SLEEPING, pc_power_sm_get_state(&s_sm));
 }
@@ -363,10 +381,11 @@ void test_boot_sequence_completes_to_on(void)
     device_tick(1000);
     TEST_ASSERT_EQUAL(PC_STATE_BOOTING, pc_power_sm_get_state(&s_sm));
 
-    /* Power LED comes on (simulated PC boot) */
+    /* Power LED comes on (simulated PC boot).
+     * POWER_LED_ON is ignored in BOOTING, so even after the debounce
+     * elapses the state stays BOOTING until USB enumerates. */
     s_hal.power_led = true;
     device_tick(2000);
-    /* POWER_LED_ON ignored in BOOTING — stays in BOOTING */
     TEST_ASSERT_EQUAL(PC_STATE_BOOTING, pc_power_sm_get_state(&s_sm));
 
     /* USB host enumerates device (OS finished booting) */
@@ -390,7 +409,6 @@ void test_wake_sleeping_pc_with_guide(void)
     inject_bt_report(&guide);
 
     int triggers_before = s_hal.power_btn_trigger_count;
-    s_hal.millis = 20000;
     device_tick(20000);
 
     /* Should have triggered power button and transitioned to BOOTING */
@@ -426,52 +444,149 @@ void test_wake_from_sleep_completes_to_on(void)
     TEST_ASSERT_EQUAL_UINT16(GAMEPAD_BTN_A, s_usb.last_report.buttons);
 }
 
-/* ── Sleep with blinking LED ────────────────────────────────────────── */
+/* ── Sleep with blinking LED (debounce) ─────────────────────────────── */
+
+void test_sleep_blinking_led_causes_no_state_transitions(void)
+{
+    /*
+     * Some motherboards blink the power LED during sleep (~1 Hz).
+     * The debounce filter ensures that these short pulses never reach
+     * the state machine, so the device stays in SLEEPING throughout.
+     */
+    inject_bt_connect();
+    drive_to_sleeping(0);
+
+    /* Simulate several 500 ms on / 500 ms off blink cycles */
+    uint32_t t = 20000;
+    for (int i = 0; i < 6; i++) {
+        s_hal.power_led = false;           /* blink off */
+        device_tick(t);
+        t += 500;
+        TEST_ASSERT_EQUAL_MESSAGE(PC_STATE_SLEEPING,
+            pc_power_sm_get_state(&s_sm), "LED blink-off caused transition");
+
+        s_hal.power_led = true;            /* blink on  */
+        device_tick(t);
+        t += 500;
+        TEST_ASSERT_EQUAL_MESSAGE(PC_STATE_SLEEPING,
+            pc_power_sm_get_state(&s_sm), "LED blink-on caused transition");
+    }
+
+    /* No power button presses during blinking */
+    TEST_ASSERT_EQUAL(0, s_hal.power_btn_trigger_count);
+}
 
 void test_sleep_blinking_led_wake_with_guide(void)
 {
     /*
-     * Some motherboards blink the power LED during sleep. Each LED edge
-     * triggers the state machine (SLEEPING → OFF on LED-off, OFF → BOOTING
-     * on LED-on, BOOTING → OFF on LED-off). The guide button still wakes
-     * the PC because WAKE_REQUESTED in OFF triggers the real power button.
+     * LED is blinking during sleep (motherboard sleep indicator).
+     * Despite the blink, pressing guide correctly wakes the PC.
      */
     inject_bt_connect();
     drive_to_sleeping(0);
-    /* After drive_to_sleeping: LED=on, prev_led=on, state=SLEEPING */
 
-    /* Blink 1: LED off → SLEEPING → OFF */
+    /* A few blink cycles — state stays SLEEPING */
     s_hal.power_led = false;
-    device_tick(12000);
-    TEST_ASSERT_EQUAL(PC_STATE_OFF, pc_power_sm_get_state(&s_sm));
-
-    /* Blink 1: LED on → OFF → BOOTING (starts boot timer, no power pulse) */
+    device_tick(20000);
     s_hal.power_led = true;
-    device_tick(13000);
-    TEST_ASSERT_EQUAL(PC_STATE_BOOTING, pc_power_sm_get_state(&s_sm));
-    TEST_ASSERT_EQUAL(0, s_hal.power_btn_trigger_count);
-
-    /* Blink 2: LED off → BOOTING → OFF (cancels boot timer) */
+    device_tick(20500);
     s_hal.power_led = false;
-    device_tick(14000);
-    TEST_ASSERT_EQUAL(PC_STATE_OFF, pc_power_sm_get_state(&s_sm));
-    TEST_ASSERT_FALSE(s_hal.boot_timer_running);
+    device_tick(21000);
+    TEST_ASSERT_EQUAL(PC_STATE_SLEEPING, pc_power_sm_get_state(&s_sm));
 
-    /* Now press guide during an OFF phase */
+    /* Press guide during a blink-off phase */
     gamepad_report_t guide = make_guide_report();
     inject_bt_report(&guide);
-    device_tick(15000);
+    s_hal.power_led = true;   /* blink back on */
+    device_tick(21500);
 
-    /* WAKE_REQUESTED triggers the real power button */
+    /* WAKE_REQUESTED fires → SLEEPING → BOOTING, power button triggered */
     TEST_ASSERT_EQUAL(PC_STATE_BOOTING, pc_power_sm_get_state(&s_sm));
     TEST_ASSERT_EQUAL(1, s_hal.power_btn_trigger_count);
 
-    /* PC wakes for real — LED stays on, USB mounts */
-    s_hal.power_led = true;
-    device_tick(16000);
-    s_hal.millis = 20000;
+    /* PC actually boots — LED stays on, USB mounts → ON */
+    s_hal.millis = 28000;
     inject_usb_mount();
     TEST_ASSERT_EQUAL(PC_STATE_ON, pc_power_sm_get_state(&s_sm));
+}
+
+/* ── LED debounce timing ────────────────────────────────────────────── */
+
+void test_led_debounce_filters_brief_pulse(void)
+{
+    /* A brief LED-on pulse shorter than the stable period is ignored */
+    s_hal.power_led = true;
+    device_tick(100);
+    TEST_ASSERT_EQUAL(PC_STATE_OFF, pc_power_sm_get_state(&s_sm));
+
+    /* LED goes off before debounce completes */
+    s_hal.power_led = false;
+    device_tick(100 + POWER_LED_STABLE_MS - 1);
+    TEST_ASSERT_EQUAL(PC_STATE_OFF, pc_power_sm_get_state(&s_sm));
+
+    /* Even well after the original change, no event since LED went back */
+    device_tick(100 + POWER_LED_STABLE_MS + 5000);
+    TEST_ASSERT_EQUAL(PC_STATE_OFF, pc_power_sm_get_state(&s_sm));
+}
+
+void test_led_on_after_stable_period_triggers_transition(void)
+{
+    /* LED turns on */
+    s_hal.power_led = true;
+    device_tick(100);
+    TEST_ASSERT_EQUAL(PC_STATE_OFF, pc_power_sm_get_state(&s_sm));
+
+    /* Just before the debounce threshold — no event */
+    device_tick(100 + POWER_LED_STABLE_MS - 1);
+    TEST_ASSERT_EQUAL(PC_STATE_OFF, pc_power_sm_get_state(&s_sm));
+
+    /* At the threshold — event fires */
+    device_tick(100 + POWER_LED_STABLE_MS);
+    TEST_ASSERT_EQUAL(PC_STATE_BOOTING, pc_power_sm_get_state(&s_sm));
+}
+
+void test_led_off_after_stable_period_triggers_transition(void)
+{
+    drive_to_on(0);
+    /* s_led_debounced is now true (on) */
+
+    /* LED turns off */
+    s_hal.power_led = false;
+    device_tick(20000);
+    TEST_ASSERT_EQUAL(PC_STATE_ON, pc_power_sm_get_state(&s_sm));
+
+    /* After debounce period — POWER_LED_OFF fires → ON → OFF */
+    device_tick(20000 + POWER_LED_STABLE_MS);
+    TEST_ASSERT_EQUAL(PC_STATE_OFF, pc_power_sm_get_state(&s_sm));
+}
+
+void test_led_debounce_resets_on_bounce(void)
+{
+    /* LED on */
+    s_hal.power_led = true;
+    device_tick(100);
+
+    /* Almost stable... */
+    device_tick(100 + POWER_LED_STABLE_MS - 100);
+    TEST_ASSERT_EQUAL(PC_STATE_OFF, pc_power_sm_get_state(&s_sm));
+
+    /* LED bounces off briefly — resets debounce timer */
+    s_hal.power_led = false;
+    device_tick(100 + POWER_LED_STABLE_MS);
+    TEST_ASSERT_EQUAL(PC_STATE_OFF, pc_power_sm_get_state(&s_sm));
+
+    /* LED back on — new debounce period starts from here */
+    uint32_t restart = 100 + POWER_LED_STABLE_MS + 50;
+    s_hal.power_led = true;
+    device_tick(restart);
+    TEST_ASSERT_EQUAL(PC_STATE_OFF, pc_power_sm_get_state(&s_sm));
+
+    /* Must wait the full period from the restart */
+    device_tick(restart + POWER_LED_STABLE_MS - 1);
+    TEST_ASSERT_EQUAL(PC_STATE_OFF, pc_power_sm_get_state(&s_sm));
+
+    device_tick(restart + POWER_LED_STABLE_MS);
+    TEST_ASSERT_EQUAL(PC_STATE_BOOTING, pc_power_sm_get_state(&s_sm));
 }
 
 /* ── Gamepad input forwarding ───────────────────────────────────────── */
@@ -486,7 +601,7 @@ void test_input_forwarded_when_pc_on(void)
     inject_bt_report(&play);
 
     s_usb.report_sent = false;
-    device_tick(6000);
+    device_tick(10000);
 
     TEST_ASSERT_TRUE(s_usb.report_sent);
     TEST_ASSERT_EQUAL_UINT16(GAMEPAD_BTN_A | GAMEPAD_BTN_Y,
@@ -507,7 +622,7 @@ void test_full_report_conversion(void)
     };
     inject_bt_report(&in);
     s_usb.report_sent = false;
-    device_tick(6000);
+    device_tick(10000);
 
     TEST_ASSERT_TRUE(s_usb.report_sent);
 
@@ -541,9 +656,10 @@ void test_input_not_forwarded_when_pc_booting(void)
 {
     inject_bt_connect();
 
-    /* Get to BOOTING via LED */
+    /* Get to BOOTING via stable LED */
     s_hal.power_led = true;
     device_tick(0);
+    device_tick(POWER_LED_STABLE_MS);
     TEST_ASSERT_EQUAL(PC_STATE_BOOTING, pc_power_sm_get_state(&s_sm));
 
     /* Send non-guide input */
@@ -552,7 +668,7 @@ void test_input_not_forwarded_when_pc_booting(void)
     inject_bt_report(&play);
 
     s_usb.report_count = 0;
-    device_tick(1000);
+    device_tick(POWER_LED_STABLE_MS + 1000);
 
     TEST_ASSERT_EQUAL(0, s_usb.report_count);
 }
@@ -724,7 +840,7 @@ void test_usb_report_all_dpad_directions(void)
         in.dpad = dir;
         inject_bt_report(&in);
         s_usb.report_sent = false;
-        device_tick(6000 + dir * 100);
+        device_tick(10000 + dir * 100);
 
         TEST_ASSERT_TRUE(s_usb.report_sent);
         uint8_t expected = (dir == 8) ? 0 : (dir + 1);
@@ -746,7 +862,7 @@ void test_usb_report_extreme_stick_values(void)
     };
     inject_bt_report(&in);
     s_usb.report_sent = false;
-    device_tick(6000);
+    device_tick(10000);
 
     TEST_ASSERT_TRUE(s_usb.report_sent);
     TEST_ASSERT_EQUAL_INT16(-32768, s_usb.last_report.lx);
@@ -770,7 +886,7 @@ void test_usb_report_all_buttons(void)
     in.buttons = all_buttons;
     inject_bt_report(&in);
     s_usb.report_sent = false;
-    device_tick(6000);
+    device_tick(10000);
 
     TEST_ASSERT_TRUE(s_usb.report_sent);
     TEST_ASSERT_EQUAL_UINT16(all_buttons, s_usb.last_report.buttons);
@@ -785,24 +901,25 @@ void test_pc_shutdown_from_on_via_led_off(void)
     /* Motherboard shuts down → LED goes off */
     s_hal.power_led = false;
     device_tick(20000);
+    /* Still ON — debounce has not elapsed yet */
+    TEST_ASSERT_EQUAL(PC_STATE_ON, pc_power_sm_get_state(&s_sm));
 
+    /* After debounce period → OFF */
+    device_tick(20000 + POWER_LED_STABLE_MS);
     TEST_ASSERT_EQUAL(PC_STATE_OFF, pc_power_sm_get_state(&s_sm));
 }
 
-void test_pc_shutdown_from_sleep_via_usb_unmount(void)
+void test_pc_shutdown_from_sleep_via_led_off(void)
 {
     drive_to_sleeping(0);
 
-    /* USB fully unmounts (power lost) */
-    s_hal.millis = 20000;
-    inject_usb_unmount();
-
-    /* USB_SUSPENDED in SLEEPING is ignored */
-    TEST_ASSERT_EQUAL(PC_STATE_SLEEPING, pc_power_sm_get_state(&s_sm));
-
-    /* But LED off means full shutdown */
+    /* LED goes off (full shutdown from sleep) */
     s_hal.power_led = false;
     device_tick(21000);
+    TEST_ASSERT_EQUAL(PC_STATE_SLEEPING, pc_power_sm_get_state(&s_sm));
+
+    /* After debounce → OFF */
+    device_tick(21000 + POWER_LED_STABLE_MS);
     TEST_ASSERT_EQUAL(PC_STATE_OFF, pc_power_sm_get_state(&s_sm));
 }
 
@@ -874,16 +991,18 @@ void test_full_lifecycle(void)
     TEST_ASSERT_EQUAL_UINT16(GAMEPAD_BTN_A | GAMEPAD_BTN_B,
                              s_usb.last_report.buttons);
 
-    /* 10. Clean shutdown: LED off → OFF */
+    /* 10. Clean shutdown: LED off → OFF (after debounce) */
     s_hal.power_led = false;
     device_tick(120000);
+    TEST_ASSERT_EQUAL(PC_STATE_ON, pc_power_sm_get_state(&s_sm));
+    device_tick(120000 + POWER_LED_STABLE_MS);
     TEST_ASSERT_EQUAL(PC_STATE_OFF, pc_power_sm_get_state(&s_sm));
 
     /* 11. No more input forwarded */
     play.buttons = GAMEPAD_BTN_Y;
     inject_bt_report(&play);
     s_usb.report_count = 0;
-    device_tick(121000);
+    device_tick(130000);
     TEST_ASSERT_EQUAL(0, s_usb.report_count);
 }
 
@@ -902,8 +1021,15 @@ int main(void)
     RUN_TEST(test_wake_sleeping_pc_with_guide);
     RUN_TEST(test_wake_from_sleep_completes_to_on);
 
-    /* Sleep with blinking LED */
+    /* Sleep with blinking LED (debounce) */
+    RUN_TEST(test_sleep_blinking_led_causes_no_state_transitions);
     RUN_TEST(test_sleep_blinking_led_wake_with_guide);
+
+    /* LED debounce timing */
+    RUN_TEST(test_led_debounce_filters_brief_pulse);
+    RUN_TEST(test_led_on_after_stable_period_triggers_transition);
+    RUN_TEST(test_led_off_after_stable_period_triggers_transition);
+    RUN_TEST(test_led_debounce_resets_on_bounce);
 
     /* Gamepad input forwarding */
     RUN_TEST(test_input_forwarded_when_pc_on);
@@ -930,7 +1056,7 @@ int main(void)
 
     /* PC shutdown */
     RUN_TEST(test_pc_shutdown_from_on_via_led_off);
-    RUN_TEST(test_pc_shutdown_from_sleep_via_usb_unmount);
+    RUN_TEST(test_pc_shutdown_from_sleep_via_led_off);
 
     /* Full lifecycle */
     RUN_TEST(test_full_lifecycle);

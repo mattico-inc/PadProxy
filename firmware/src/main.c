@@ -29,6 +29,14 @@ static bool s_prev_report_valid;
 #define BOOT_TIMEOUT_MS     30000
 
 /**
+ * How long the power LED must remain in a new state (on or off) before
+ * the state machine sees the change.  Filters out motherboard sleep-mode
+ * LED blinking so it doesn't destabilise the power state machine.
+ * Increase this value for boards with very slow blink patterns.
+ */
+#define POWER_LED_STABLE_MS 3000
+
+/**
  * Execute hardware actions requested by a power state machine transition.
  */
 static void dispatch_actions(uint32_t actions)
@@ -85,22 +93,40 @@ static void on_bt_event(uint8_t idx, bt_gamepad_state_t state)
 
 /* ── Hardware polling ────────────────────────────────────────────────── */
 
-static bool s_prev_led;
+/** Debounced power-LED state. */
+static bool     s_led_reading;     /* latest raw GPIO sample             */
+static bool     s_led_debounced;   /* accepted (stable) LED state        */
+static uint32_t s_led_changed_ms;  /* when s_led_reading last changed    */
 
 /**
  * Poll GPIO inputs and timers, feed edge-triggered events into the power SM.
+ *
+ * The power LED is debounced: a new reading must persist for at least
+ * POWER_LED_STABLE_MS before the state machine is notified.  This
+ * prevents motherboard sleep-blink patterns from bouncing the SM.
  */
 static void poll_hardware(uint32_t now_ms)
 {
     bool led = pc_power_hal_read_power_led();
     pc_power_result_t r;
 
-    /* Power LED edges */
-    if (led && !s_prev_led) {
-        r = pc_power_sm_process(&s_power_sm, PC_EVENT_POWER_LED_ON, now_ms);
-        dispatch_actions(r.actions);
-    } else if (!led && s_prev_led) {
-        r = pc_power_sm_process(&s_power_sm, PC_EVENT_POWER_LED_OFF, now_ms);
+    /* Reset debounce timer whenever the raw reading changes */
+    if (led != s_led_reading) {
+        s_led_reading   = led;
+        s_led_changed_ms = now_ms;
+    }
+
+    /* Emit an edge event only after the reading has been stable */
+    if (s_led_reading != s_led_debounced &&
+        (now_ms - s_led_changed_ms) >= POWER_LED_STABLE_MS) {
+        s_led_debounced = s_led_reading;
+        if (s_led_debounced) {
+            r = pc_power_sm_process(&s_power_sm, PC_EVENT_POWER_LED_ON,
+                                    now_ms);
+        } else {
+            r = pc_power_sm_process(&s_power_sm, PC_EVENT_POWER_LED_OFF,
+                                    now_ms);
+        }
         dispatch_actions(r.actions);
     }
 
@@ -109,8 +135,6 @@ static void poll_hardware(uint32_t now_ms)
         r = pc_power_sm_process(&s_power_sm, PC_EVENT_BOOT_TIMEOUT, now_ms);
         dispatch_actions(r.actions);
     }
-
-    s_prev_led = led;
 }
 
 /* ── Main loop ───────────────────────────────────────────────────────── */
@@ -169,7 +193,9 @@ int main(void)
     /* Initialize power management */
     pc_power_hal_init();
     pc_power_sm_init(&s_power_sm);
-    s_prev_led = pc_power_hal_read_power_led();
+    s_led_reading   = pc_power_hal_read_power_led();
+    s_led_debounced = s_led_reading;
+    s_led_changed_ms = 0;
 
     /* Initialize USB HID gamepad (must be before BT so USB is ready) */
     usb_hid_gamepad_init(on_usb_state_change);
