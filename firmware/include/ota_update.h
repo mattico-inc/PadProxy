@@ -19,9 +19,9 @@
  *   6. On next boot, rom_explicit_buy() accepts the new image
  *   7. If the new image crashes, boot ROM rolls back automatically
  *
- * WiFi credentials and the GitHub repository are configured at compile
- * time via cmake defines:
- *   -DWIFI_SSID="MyNetwork" -DWIFI_PASSWORD="secret"
+ * WiFi credentials are provided by the caller (typically from the
+ * device config, with compile-time defaults as fallback).
+ * The GitHub repository is configured at compile time via cmake defines:
  *   -DGITHUB_OTA_OWNER="owner" -DGITHUB_OTA_REPO="repo"
  *
  * Requires a partition table with linked A/B partitions to be flashed
@@ -52,6 +52,17 @@ typedef enum {
 void ota_accept_current_image(void);
 
 /**
+ * WiFi credentials for OTA update checks.
+ *
+ * The caller provides credentials — typically from the device config
+ * (runtime/flash) with compile-time defaults as fallback.
+ */
+typedef struct {
+    const char *ssid;
+    const char *password;
+} ota_wifi_creds_t;
+
+/**
  * Check for a firmware update on GitHub and apply it if available.
  *
  * This is a blocking call that may take 10-60 seconds depending on
@@ -61,9 +72,10 @@ void ota_accept_current_image(void);
  * If an update is applied, this function issues a FLASH_UPDATE reboot
  * and does not return.
  *
+ * @param creds  WiFi credentials. Pass NULL to skip the update check.
  * @return Result code indicating outcome.
  */
-ota_update_result_t ota_update_check_and_apply(void);
+ota_update_result_t ota_update_check_and_apply(const ota_wifi_creds_t *creds);
 
 /**
  * Get a human-readable name for a result code.
