@@ -36,7 +36,7 @@ PICO_SDK_PATH  ?= $(PICO_SDK_DIR)
 
 # ── Test binaries ────────────────────────────────────────────────────────
 
-TEST_BINS = $(TEST_BUILD_DIR)/test_pc_power_state $(TEST_BUILD_DIR)/test_gamepad $(TEST_BUILD_DIR)/test_ota_version $(TEST_BUILD_DIR)/test_device_integration
+TEST_BINS = $(TEST_BUILD_DIR)/test_pc_power_state $(TEST_BUILD_DIR)/test_gamepad $(TEST_BUILD_DIR)/test_ota_version $(TEST_BUILD_DIR)/test_device_config $(TEST_BUILD_DIR)/test_setup_cmd $(TEST_BUILD_DIR)/test_device_integration
 
 # ── Firmware cmake arguments ─────────────────────────────────────────────
 
@@ -104,6 +104,12 @@ $(TEST_BUILD_DIR)/test_gamepad: test/test_gamepad/test_gamepad.c src/usb_hid_rep
 	$(CC) $(CFLAGS) -o $@ $^
 
 $(TEST_BUILD_DIR)/test_ota_version: test/test_ota_version/test_ota_version.c src/ota_version.c $(UNITY_SRC) | $(TEST_BUILD_DIR)
+	$(CC) $(CFLAGS) -o $@ $^
+
+$(TEST_BUILD_DIR)/test_device_config: test/test_device_config/test_device_config.c src/device_config.c $(UNITY_SRC) | $(TEST_BUILD_DIR)
+	$(CC) $(CFLAGS) -o $@ $^
+
+$(TEST_BUILD_DIR)/test_setup_cmd: test/test_setup_cmd/test_setup_cmd.c src/setup_cmd.c src/device_config.c $(UNITY_SRC) | $(TEST_BUILD_DIR)
 	$(CC) $(CFLAGS) -o $@ $^
 
 $(TEST_BUILD_DIR)/test_device_integration: test/test_device_integration/test_device_integration.c src/pc_power_state.c src/usb_hid_report.c $(UNITY_SRC) | $(TEST_BUILD_DIR)

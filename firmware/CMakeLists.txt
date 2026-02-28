@@ -57,6 +57,8 @@ add_executable(padproxy
     src/pc_power_hal.c
     src/ota_version.c
     src/ota_update.c
+    src/device_config.c
+    src/setup_cmd.c
 )
 
 target_include_directories(padproxy PRIVATE include src)
