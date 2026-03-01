@@ -1,18 +1,29 @@
-# PadProxy firmware build
+# PadProxy Firmware Build — Zero System Dependencies!
+#
+# Just run `make firmware` and everything downloads automatically:
+#   ✓ CMake (portable binary)
+#   ✓ ARM GCC toolchain (portable binary)
+#   ✓ Pico SDK (git clone)
+#   ✓ Bluepad32 (git clone)
 #
 # Targets:
-#   make firmware  - Cross-compile for RP2350 (output: build/firmware/padproxy.uf2)
+#   make firmware  - Build firmware (auto-downloads everything)
 #   make test      - Build and run host-native unit tests
-#   make flash     - Copy UF2 to Pico 2 W in BOOTSEL mode
-#   make deps      - Clone Pico SDK and Bluepad32 into lib/
-#   make clean     - Remove build artifacts (keeps lib/)
-#   make distclean - Remove build artifacts and cloned dependencies
+#   make flash     - Flash UF2 to Pico 2 W in BOOTSEL mode
+#   make tools     - Download CMake and ARM toolchain only
+#   make deps      - Clone Pico SDK and Bluepad32 only
+#   make clean     - Remove build artifacts (keeps lib/ and tools/)
+#   make distclean - Remove everything (build/, lib/, tools/)
+#
+# Requirements: git, make, curl/wget (that's it!)
 #
 # Variables:
-#   PICO_SDK_PATH  - Path to Pico SDK (default: lib/pico-sdk)
-#   PICO_MOUNT     - Mount point of Pico in BOOTSEL mode (auto-detected)
+#   CMAKE_VERSION     - CMake version (default: 3.28.3)
+#   ARM_TOOLCHAIN_VER - ARM GCC version (default: 13.2.rel1)
+#   PICO_SDK_PATH     - Pico SDK path (default: lib/pico-sdk)
+#   PICO_MOUNT        - Pico mount point (auto-detected)
 
-# ── Tooling ──────────────────────────────────────────────────────────────
+# ── Host tooling (for tests) ─────────────────────────────────────────────
 
 CC      = gcc
 CFLAGS  = -Wall -Wextra -Werror -std=c11 -g -O0
@@ -26,13 +37,87 @@ UNITY_SRC      = test/unity/unity.c
 
 # ── Dependencies ─────────────────────────────────────────────────────────
 
-PICO_SDK_TAG    ?= 2.1.0
-BLUEPAD32_TAG   ?= 4.2.0
+PICO_SDK_TAG      ?= 2.1.0
+BLUEPAD32_TAG     ?= 4.2.0
+CMAKE_VERSION     ?= 3.28.3
+ARM_TOOLCHAIN_VER ?= 13.2.rel1
+
 BLUEPAD32_DIR    = lib/bluepad32
 PICO_SDK_DIR     = lib/pico-sdk
+TOOLS_DIR        = tools
 
 # Use PICO_SDK_PATH if set by the user, otherwise clone to lib/pico-sdk
 PICO_SDK_PATH  ?= $(PICO_SDK_DIR)
+
+# ── Detect OS and architecture ──────────────────────────────────────────
+
+UNAME_S := $(shell uname -s)
+UNAME_M := $(shell uname -m)
+
+# ── Portable CMake (auto-downloaded, no system install needed) ──────────
+
+ifeq ($(UNAME_S),Darwin)
+    CMAKE_OS = macos-universal
+    CMAKE_EXT = tar.gz
+else ifeq ($(UNAME_S),Linux)
+    ifeq ($(UNAME_M),x86_64)
+        CMAKE_OS = linux-x86_64
+    else ifeq ($(UNAME_M),aarch64)
+        CMAKE_OS = linux-aarch64
+    else
+        $(error Unsupported Linux architecture: $(UNAME_M))
+    endif
+    CMAKE_EXT = tar.gz
+else
+    $(error Unsupported OS: $(UNAME_S))
+endif
+
+CMAKE_ARCHIVE = cmake-$(CMAKE_VERSION)-$(CMAKE_OS).$(CMAKE_EXT)
+CMAKE_URL = https://github.com/Kitware/CMake/releases/download/v$(CMAKE_VERSION)/$(CMAKE_ARCHIVE)
+CMAKE_DIR = $(TOOLS_DIR)/cmake-$(CMAKE_VERSION)-$(CMAKE_OS)
+CMAKE = $(CMAKE_DIR)/CMake.app/Contents/bin/cmake
+
+# On Linux, cmake is directly in bin/
+ifeq ($(UNAME_S),Linux)
+    CMAKE = $(CMAKE_DIR)/bin/cmake
+endif
+
+# ── Portable ARM Toolchain (auto-downloaded, no system install needed) ──
+
+ifeq ($(UNAME_S),Darwin)
+    ifeq ($(UNAME_M),arm64)
+        ARM_HOST = darwin-arm64
+    else ifeq ($(UNAME_M),x86_64)
+        ARM_HOST = darwin-x86_64
+    else
+        $(error Unsupported macOS architecture: $(UNAME_M))
+    endif
+    ARM_EXT = tar.xz
+else ifeq ($(UNAME_S),Linux)
+    ifeq ($(UNAME_M),x86_64)
+        ARM_HOST = x86_64-linux
+    else ifeq ($(UNAME_M),aarch64)
+        ARM_HOST = aarch64-linux
+    else
+        $(error Unsupported Linux architecture: $(UNAME_M))
+    endif
+    ARM_EXT = tar.xz
+else
+    $(error Unsupported OS: $(UNAME_S))
+endif
+
+ARM_TOOLCHAIN_NAME = arm-gnu-toolchain-$(ARM_TOOLCHAIN_VER)-$(ARM_HOST)-arm-none-eabi
+ARM_ARCHIVE = $(ARM_TOOLCHAIN_NAME).$(ARM_EXT)
+ARM_URL = https://developer.arm.com/-/media/Files/downloads/gnu/$(ARM_TOOLCHAIN_VER)/binrel/$(ARM_ARCHIVE)
+ARM_TOOLCHAIN_DIR = $(TOOLS_DIR)/$(ARM_TOOLCHAIN_NAME)
+ARM_TOOLCHAIN_BIN = $(ARM_TOOLCHAIN_DIR)/bin
+
+# ARM toolchain binaries
+ARM_CC      = $(ARM_TOOLCHAIN_BIN)/arm-none-eabi-gcc
+ARM_CXX     = $(ARM_TOOLCHAIN_BIN)/arm-none-eabi-g++
+ARM_OBJCOPY = $(ARM_TOOLCHAIN_BIN)/arm-none-eabi-objcopy
+ARM_SIZE    = $(ARM_TOOLCHAIN_BIN)/arm-none-eabi-size
+ARM_GDB     = $(ARM_TOOLCHAIN_BIN)/arm-none-eabi-gdb
 
 # ── Test binaries ────────────────────────────────────────────────────────
 
@@ -48,9 +133,50 @@ PICO_MOUNT ?= $(firstword $(wildcard /media/$(USER)/RP2350 /media/$(USER)/RPI-RP
 
 # ── Phony targets ────────────────────────────────────────────────────────
 
-.PHONY: all firmware test flash deps clean distclean
+.PHONY: all firmware test flash deps tools clean distclean
 
 all: firmware
+
+tools: $(CMAKE) $(ARM_CC)
+	@echo "All tools installed:"
+	@echo "  CMake: $(CMAKE)"
+	@echo "  ARM GCC: $(ARM_CC)"
+
+# ── Tool installation ────────────────────────────────────────────────────
+
+# Download and extract portable CMake
+$(CMAKE):
+	@echo "Downloading CMake $(CMAKE_VERSION) for $(CMAKE_OS)..."
+	@mkdir -p $(TOOLS_DIR)
+	@if command -v curl >/dev/null 2>&1; then \
+		curl -L -o $(TOOLS_DIR)/$(CMAKE_ARCHIVE) $(CMAKE_URL); \
+	elif command -v wget >/dev/null 2>&1; then \
+		wget -O $(TOOLS_DIR)/$(CMAKE_ARCHIVE) $(CMAKE_URL); \
+	else \
+		echo "Error: Neither curl nor wget found. Please install one."; \
+		exit 1; \
+	fi
+	@echo "Extracting CMake..."
+	@cd $(TOOLS_DIR) && tar xzf $(CMAKE_ARCHIVE)
+	@rm $(TOOLS_DIR)/$(CMAKE_ARCHIVE)
+	@echo "CMake installed at $(CMAKE)"
+
+# Download and extract portable ARM toolchain
+$(ARM_CC):
+	@echo "Downloading ARM toolchain $(ARM_TOOLCHAIN_VER) for $(ARM_HOST)..."
+	@mkdir -p $(TOOLS_DIR)
+	@if command -v curl >/dev/null 2>&1; then \
+		curl -L -o $(TOOLS_DIR)/$(ARM_ARCHIVE) $(ARM_URL); \
+	elif command -v wget >/dev/null 2>&1; then \
+		wget -O $(TOOLS_DIR)/$(ARM_ARCHIVE) $(ARM_URL); \
+	else \
+		echo "Error: Neither curl nor wget found. Please install one."; \
+		exit 1; \
+	fi
+	@echo "Extracting ARM toolchain (this may take a minute)..."
+	@cd $(TOOLS_DIR) && tar xJf $(ARM_ARCHIVE)
+	@rm $(TOOLS_DIR)/$(ARM_ARCHIVE)
+	@echo "ARM toolchain installed at $(ARM_TOOLCHAIN_BIN)"
 
 # ── Dependencies ─────────────────────────────────────────────────────────
 
@@ -65,9 +191,9 @@ $(PICO_SDK_DIR):
 
 # ── Firmware (cross-compile for RP2350) ──────────────────────────────────
 
-firmware: $(BLUEPAD32_DIR) $(PICO_SDK_PATH) | $(FW_BUILD_DIR)
-	cd $(FW_BUILD_DIR) && cmake $(CMAKE_ARGS) ../..
-	$(MAKE) -C $(FW_BUILD_DIR) -j$(shell nproc)
+firmware: $(BLUEPAD32_DIR) $(PICO_SDK_PATH) $(CMAKE) $(ARM_CC) | $(FW_BUILD_DIR)
+	PATH="$(abspath $(ARM_TOOLCHAIN_BIN)):$$PATH" $(abspath $(CMAKE)) -B $(FW_BUILD_DIR) -S . $(CMAKE_ARGS)
+	PATH="$(abspath $(ARM_TOOLCHAIN_BIN)):$$PATH" $(MAKE) -C $(FW_BUILD_DIR) -j$(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 	@echo "=== Firmware built: $(FW_BUILD_DIR)/padproxy.uf2 ==="
 
 $(FW_BUILD_DIR):
@@ -124,4 +250,4 @@ clean:
 	rm -rf build/
 
 distclean: clean
-	rm -rf lib/
+	rm -rf lib/ tools/
