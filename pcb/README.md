@@ -12,10 +12,8 @@ KiCad project files for the PadProxy hardware.
 ### USB Architecture
 - **USB 2.0 9-pin header input** - Primary connection from motherboard
 - **USB-C port** - Alternative connection for development/fallback
-- **FE1.1s USB Hub IC** - Provides port passthrough for user devices
-- **USB 2.0 9-pin header output** - Passthrough ports for user's existing USB devices
 
-The Pico 2 W USB data lines connect directly to USB Port 1 for optimal HID latency. Port 2 feeds the hub IC, which provides passthrough ports so users don't lose USB connectivity.
+The Pico 2 W USB data lines connect directly to USB Port 1 for optimal HID latency.
 
 ### Power Management
 - USB standby power (5VSB) support - stays powered when PC is off
@@ -37,7 +35,6 @@ The Pico 2 W USB data lines connect directly to USB Port 1 for optimal HID laten
 | Connector | Type | Purpose |
 |-----------|------|---------|
 | USB_IN | 9-pin header socket | From motherboard USB header |
-| USB_OUT | 9-pin header pins | To user's USB devices |
 | USB_C | USB-C receptacle | Alt connection / development |
 | FP_CABLE | 4-pin header | 4-wire cable to motherboard front panel header |
 | 5VSB | 2-pin header | Optional backup power |
@@ -47,7 +44,6 @@ The Pico 2 W USB data lines connect directly to USB Port 1 for optimal HID laten
 | Component | Part | Purpose |
 |-----------|------|---------|
 | MCU | Raspberry Pi Pico 2 W | Main controller (RP2350 + CYW43439 BT/WiFi) |
-| Hub IC | FE1.1s | USB 2.0 hub (4-port) |
 | Photo-MOSFET Optocoupler | TLP222A | Power button trigger (polarity-agnostic) |
 | Optocoupler | PC817 | Power LED sense (optically isolated) |
 | Addressable LED | WS2812B / SK6812 | Status indicator |
