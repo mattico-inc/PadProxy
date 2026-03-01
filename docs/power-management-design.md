@@ -44,10 +44,9 @@ PadProxy supports multiple power input options for maximum compatibility:
 |-----------|---------|------|
 | Pico 2 W (active, BT) | 50mA | 150mA |
 | Pico 2 W (dormant, BT listening) | 5-10mA | - |
-| FE1.1s USB Hub | 20mA | 50mA |
 | Status LEDs | 5mA | 20mA |
-| **Total (active)** | **~75mA** | **~220mA** |
-| **Total (standby)** | **~25mA** | - |
+| **Total (active)** | **~55mA** | **~170mA** |
+| **Total (standby)** | **~15mA** | - |
 
 USB standby power typically provides 500mA-2A depending on motherboard, which is sufficient.
 
@@ -60,9 +59,7 @@ USB standby power typically provides 500mA-2A depending on motherboard, which is
 USB 2.0 Header ─── 5V ──►│──┬──► VSYS ──► Pico 2 W        │
 (Primary)                │  │    (onboard 3.3V regulator)  │
                          │  │                              │
-                         │  └──► 5V Rail ──► USB Hub       │
-                         │         │                       │
-5VSB Tap (Optional) ────►│────────┘ (diode OR)             │
+5VSB Tap (Optional) ────►│──┘ (diode OR)                   │
                          │                                 │
                          └─────────────────────────────────┘
 ```
@@ -75,48 +72,28 @@ USB 2.0 Header ─── 5V ──►│──┬──► VSYS ──► Pico 2
 
 ### Design Rationale
 
-The Pico 2 W connects **directly** to the motherboard USB port for optimal HID performance. The USB hub is a separate convenience feature that doesn't affect gamepad functionality.
-
-**Key principle:** Hub issues should never break gamepad functionality.
+The Pico 2 W connects **directly** to the motherboard USB port for optimal HID performance. Only one USB port is used — dedicated to the gamepad HID device.
 
 ### Block Diagram
 
 ```
 Motherboard USB 2.0 Header (9-pin)
             │
-            ├── Port 1 ──────────────► Pico 2 W USB Device
-            │                          (TinyUSB HID Device)
-            │                          - Gamepad emulation
-            │                          - Latency critical
-            │                          - Direct connection
-            │
-            └── Port 2 ──► FE1.1s ──┬──► USB Header OUT (Port A)
-                         USB Hub    ├──► USB Header OUT (Port B)
-                         IC         └──► (Spare - test pad)
+            └── Port 1 ──────────────► Pico 2 W USB Device
+                                       (TinyUSB HID Device)
+                                       - Gamepad emulation
+                                       - Latency critical
+                                       - Direct connection
 ```
-
-### Port Allocation Summary
-
-| Connection | Source | Destination | Purpose |
-|------------|--------|-------------|---------|
-| Motherboard Port 1 | 9-pin header | Pico 2 W | Gamepad HID (direct) |
-| Motherboard Port 2 | 9-pin header | FE1.1s upstream | Hub connection |
-| Hub Downstream 1 | FE1.1s | 9-pin OUT header | User device passthrough |
-| Hub Downstream 2 | FE1.1s | 9-pin OUT header | User device passthrough |
-| Hub Downstream 3 | FE1.1s | Test pad | Debug/expansion |
-| Hub Downstream 4 | FE1.1s | NC | Reserved |
 
 ### USB Enumeration Behavior
 
 **When PC boots:**
 1. Pico 2 W enumerates as USB HID Gamepad
-2. FE1.1s enumerates as USB Hub
-3. Downstream devices enumerate through hub
 
 **When PC is off (standby power):**
 1. Pico 2 W remains powered, no USB host activity
-2. Hub remains powered but idle
-3. Pico 2 W monitors for USB host connection to detect PC wake
+2. Pico 2 W monitors for USB host connection to detect PC wake
 
 ---
 
@@ -370,26 +347,17 @@ any ground reference dependency between PadProxy and the motherboard. Inherently
 | FP_CABLE | 4-pin header (JST-XH or 2.54mm) | 4 | 4-wire cable to motherboard front panel header |
 | 5VSB_IN | 2-pin header | 2 | Optional backup power |
 
-### Output Connectors
-
-| Connector | Type | Pins | Purpose |
-|-----------|------|------|---------|
-| USB_OUT | USB 2.0 9-pin header pins | 9 | To user's USB devices (via hub) |
-
 ### Connection Modes
 
 PadProxy supports multiple connection configurations:
 
-#### Mode A: Full Internal Install (Recommended)
+#### Mode A: Internal Install (Recommended)
 
 ```
-Motherboard          9-pin        PadProxy         9-pin         User's
-USB 2.0 Header ════► cable ════► 9-pin IN         OUT ════════► Front Panel
-                                     │                          USB / AIO / etc
-                                     ├── Port 1 → Pico 2 W
-                                     └── Port 2 → Hub → USB_OUT
-
-Features: Pico 2 W direct connection + Hub passthrough
+Motherboard          9-pin        PadProxy
+USB 2.0 Header ════► cable ════► 9-pin IN
+                                     │
+                                     └── Port 1 → Pico 2 W
 ```
 
 #### Mode B: Rear USB with Adapter Cable
@@ -397,13 +365,11 @@ Features: Pico 2 W direct connection + Hub passthrough
 For systems where internal USB headers are fully occupied:
 
 ```
-Rear USB          USB-A to       PadProxy         9-pin         User's
-Port        ════► 9-pin cable ══► 9-pin IN         OUT ════════► Devices
+Rear USB          USB-A to       PadProxy
+Port        ════► 9-pin cable ══► 9-pin IN
                                      │
-                                     ├── Port 1 → Pico 2 W
-                                     └── Port 2 → Hub → USB_OUT
+                                     └── Port 1 → Pico 2 W
 
-Features: Pico 2 W direct connection + Hub passthrough
 Requires: USB-A male to 9-pin female adapter cable
 ```
 
@@ -416,9 +382,6 @@ Any USB           USB-C          PadProxy
 Port        ════► cable    ════► USB-C port
                                      │
                                      └── Pico 2 W only
-
-Features: Gamepad functionality only
-Limitation: Hub passthrough NOT available (only 1 USB port)
 ```
 
 ### Recommended Cables
@@ -444,7 +407,7 @@ Pin 6 → │5V │D- │D+ │GND│NC │ ← Pin 10
          P1  P1  P1  P1     P2  P2  P2  P2
 
 P1 = USB Port 1 (D-/D+ directly to Pico 2 W)
-P2 = USB Port 2 (D-/D+ to Hub upstream)
+P2 = USB Port 2 (unused)
 5V = Shared power rail
 KEY = Blocked pin for keying
 ```
@@ -472,11 +435,9 @@ Standard ATX front panel header:
 | Component | Part Number | Package | Purpose | Est. Cost |
 |-----------|-------------|---------|---------|-----------|
 | MCU | Raspberry Pi Pico 2 W | Module | Main controller (RP2350 + CYW43439 BT/WiFi) | $7.00 |
-| USB Hub | FE1.1s | SSOP-28 | USB port expansion | $0.50 |
 | Photo-MOSFET Optocoupler | TLP222A (or AQY212 / CPC1017N) | DIP-4/SOP-4 | Power button trigger (polarity-agnostic) | $0.60 |
 | Optocoupler (sense) | PC817 | DIP-4/SMD | Power LED sense (optically isolated) | $0.10 |
 | Addressable LED | WS2812B or SK6812 | 5050 | Status indicator (single-wire protocol) | $0.05 |
-| Crystal | 12MHz | HC49/SMD | Hub clock | $0.15 |
 
 ### Power Button Trigger Components
 
@@ -493,22 +454,11 @@ Standard ATX front panel header:
 | Resistor | 470Ω | 1 | Current limit for sense optocoupler LED input |
 | Resistor | 10kΩ | 1 | Pull-up for sense optocoupler output to Pico GPIO |
 
-### USB Hub Support Components
-
-| Component | Value | Qty | Purpose |
-|-----------|-------|-----|---------|
-| Crystal | 12MHz | 1 | FE1.1s clock |
-| Load capacitors | 22pF | 2 | Crystal circuit |
-| Bypass capacitors | 100nF | 3 | Power filtering |
-| Upstream resistors | 1.5kΩ | 1 | USB pull-up |
-| ESD protection | USBLC6-2 | 1 | Optional, recommended |
-
 ### Connectors
 
 | Component | Part Number | Purpose | Est. Cost |
 |-----------|-------------|---------|-----------|
 | USB 2.0 Header (F) | Generic 9-pin | Input from motherboard | $0.30 |
-| USB 2.0 Header (M) | Generic 9-pin | Output to user devices | $0.30 |
 | USB-C Receptacle | Generic 16-pin | Alt connection | $0.40 |
 | 4-pin connector | JST-XH or 2.54mm header | 4-wire cable to motherboard front panel header | $0.20 |
 
@@ -526,11 +476,11 @@ own front panel wires.
 
 | Category | Cost | Notes |
 |----------|------|-------|
-| Active components | ~$8.00 | MCU, hub, optocouplers, LED |
-| Passive components | ~$0.30 | Resistors, caps, crystal |
-| Connectors | ~$1.20 | USB headers, USB-C, 4-pin header |
+| Active components | ~$7.75 | MCU, optocouplers, LED |
+| Passive components | ~$0.15 | Resistors |
+| Connectors | ~$0.90 | USB header, USB-C, 4-pin header |
 | PCB (qty 5) | ~$2.00 each | |
-| **Total per unit** | **~$11.50** | |
+| **Total per unit** | **~$10.80** | |
 
 ---
 
@@ -571,7 +521,6 @@ the onboard PCB antenna — no external antenna connector needed.
 ### Thermal
 
 - Pico 2 W generates minimal heat in typical operation (~50mA)
-- FE1.1s generates minimal heat
 - No special cooling required
 
 ### ESD Protection
