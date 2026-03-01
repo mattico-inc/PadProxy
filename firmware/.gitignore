@@ -1,0 +1,5 @@
+_deps/
+generated/
+pioasm/
+pioasm-install/
+bluepad32/

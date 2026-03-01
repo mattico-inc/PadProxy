@@ -1,6 +1,7 @@
 # Build artifacts
 firmware/lib/
 firmware/build/
+firmware/tools/
 *.o
 *.a
 *.elf
