@@ -71,3 +71,5 @@ See `bom/` for component list and placement files for automated assembly.
 ## Design Documentation
 
 See [Power Management Design](../docs/power-management-design.md) for detailed design rationale, GPIO assignments, and circuit descriptions.
+
+See [PCB v2 Design Notes](../docs/pcb-v2-design.md) for the next-revision design: custom RP2350B, separate wireless module, USB-C only, and active dual-port power management.

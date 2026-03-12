@@ -629,3 +629,6 @@ for now due to wide availability and DIP-4 hand-soldering friendliness.
 | 0.3 | 2026-02-07 | Added 5V tolerance protection (Zener clamp on LED sense). Added optional reset trigger circuit (DNP). Dual-footprint connectors (headers + screw terminals). Resolved design questions D1-D4. Updated BOM and GPIO table. |
 | 0.4 | 2026-02-21 | Migrated from ESP32-S3-WROOM-1 to Raspberry Pi Pico 2 W (RP2350). Removed external LDO and antenna connector. Updated GPIO assignments, power budget, BOM, and all circuit descriptions. |
 | 0.5 | 2026-02-22 | Simplified front panel interface: removed power button sense circuit (bridge rectifier + PC817), replaced LED Zener clamp with PC817 optocoupler for full optical isolation, 4-wire cable design (PWR_BTN trigger + PWR_LED sense). Removed reset trigger, OLED header. Replaced discrete RGB LEDs with WS2812B addressable LED. Reduced GPIO count from 8 to 3. Updated BOM, connector specs, design decisions D1-D7. |
+
+**Note:** PCB v2 (custom RP2350B, separate wireless module, USB-C only, active power mux)
+is tracked in [pcb-v2-design.md](pcb-v2-design.md).
