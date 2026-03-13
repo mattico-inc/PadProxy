@@ -85,12 +85,20 @@ void test_validate_boot_timeout_too_low(void)
 
 void test_validate_boot_timeout_too_high(void)
 {
-    /* boot_timeout_ms is uint16, max 65535 which is < BOOT_TIMEOUT_MAX
-     * when BOOT_TIMEOUT_MAX > 65535. But BOOT_TIMEOUT_MAX is 120000
-     * which doesn't fit in uint16. The max u16 value is 65535, so
-     * we test that the valid range ceiling works. */
-    cfg.boot_timeout_ms = DEVICE_CONFIG_BOOT_TIMEOUT_MIN - 1;
+    cfg.boot_timeout_ms = DEVICE_CONFIG_BOOT_TIMEOUT_MAX + 1;
     TEST_ASSERT_FALSE(device_config_validate(&cfg));
+}
+
+void test_validate_boot_timeout_at_min(void)
+{
+    cfg.boot_timeout_ms = DEVICE_CONFIG_BOOT_TIMEOUT_MIN;
+    TEST_ASSERT_TRUE(device_config_validate(&cfg));
+}
+
+void test_validate_boot_timeout_at_max(void)
+{
+    cfg.boot_timeout_ms = DEVICE_CONFIG_BOOT_TIMEOUT_MAX;
+    TEST_ASSERT_TRUE(device_config_validate(&cfg));
 }
 
 void test_validate_empty_device_name(void)
@@ -241,6 +249,18 @@ void test_deserialize_all_ones(void)
     TEST_ASSERT_FALSE(device_config_deserialize(&loaded, buf, sizeof(buf)));
 }
 
+void test_deserialize_bad_version(void)
+{
+    /* Format: [magic: 4B][version: 2B][payload][crc32: 4B]
+     * Corrupt the version field (bytes 4-5) so the version check fails. */
+    int n = device_config_serialize(&cfg, buf, sizeof(buf));
+    TEST_ASSERT_TRUE(n > 0);
+    buf[4] ^= 0xFF;  /* corrupt version low byte */
+
+    device_config_t loaded;
+    TEST_ASSERT_FALSE(device_config_deserialize(&loaded, buf, (size_t)n));
+}
+
 /* ── Serialize error cases ───────────────────────────────────────────── */
 
 void test_serialize_null_cfg(void)
@@ -279,6 +299,8 @@ int main(void)
     RUN_TEST(test_validate_power_pulse_at_max);
     RUN_TEST(test_validate_boot_timeout_too_low);
     RUN_TEST(test_validate_boot_timeout_too_high);
+    RUN_TEST(test_validate_boot_timeout_at_min);
+    RUN_TEST(test_validate_boot_timeout_at_max);
     RUN_TEST(test_validate_empty_device_name);
 
     /* Serialization roundtrip */
@@ -296,6 +318,7 @@ int main(void)
     RUN_TEST(test_deserialize_bad_crc);
     RUN_TEST(test_deserialize_all_zeros);
     RUN_TEST(test_deserialize_all_ones);
+    RUN_TEST(test_deserialize_bad_version);
 
     /* Serialize errors */
     RUN_TEST(test_serialize_null_cfg);

@@ -12,6 +12,7 @@
 #include <string.h>
 #include <uni.h>
 #include "pico/critical_section.h"
+#include "bt_gamepad_convert.h"
 
 /* ── Shared state ────────────────────────────────────────────────────── */
 
@@ -48,35 +49,14 @@ static uint16_t map_buttons(uint32_t bp_buttons, uint32_t bp_misc)
     return out;
 }
 
-/**
- * Scale Bluepad32 axis value (-512..511) to int16_t (-32768..32767).
- */
-static int16_t scale_axis(int32_t value)
-{
-    int32_t scaled = value * 64;
-    if (scaled > 32767) scaled = 32767;
-    if (scaled < -32768) scaled = -32768;
-    return (int16_t)scaled;
-}
-
-/**
- * Clamp a trigger value to 0..1023.
- */
-static uint16_t clamp_trigger(int32_t value)
-{
-    if (value < 0) return 0;
-    if (value > 1023) return 1023;
-    return (uint16_t)value;
-}
-
 static void convert_report(const uni_gamepad_t *gp, gamepad_report_t *out)
 {
-    out->lx = scale_axis(gp->axis_x);
-    out->ly = scale_axis(gp->axis_y);
-    out->rx = scale_axis(gp->axis_rx);
-    out->ry = scale_axis(gp->axis_ry);
-    out->lt = clamp_trigger(gp->brake);
-    out->rt = clamp_trigger(gp->throttle);
+    out->lx = bt_gamepad_scale_axis(gp->axis_x);
+    out->ly = bt_gamepad_scale_axis(gp->axis_y);
+    out->rx = bt_gamepad_scale_axis(gp->axis_rx);
+    out->ry = bt_gamepad_scale_axis(gp->axis_ry);
+    out->lt = bt_gamepad_clamp_trigger(gp->brake);
+    out->rt = bt_gamepad_clamp_trigger(gp->throttle);
     out->buttons = map_buttons(gp->buttons, gp->misc_buttons);
     out->dpad = gamepad_dpad_to_hat(gp->dpad);
 }

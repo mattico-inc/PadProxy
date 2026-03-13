@@ -51,6 +51,7 @@ add_subdirectory(${BLUEPAD32_ROOT}/src/components/bluepad32 bluepad32)
 add_executable(padproxy
     src/main.c
     src/bt_gamepad.c
+    src/bt_gamepad_convert.c
     src/usb_hid_gamepad.c
     src/usb_hid_report.c
     src/pc_power_state.c
