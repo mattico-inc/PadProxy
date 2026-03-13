@@ -283,6 +283,12 @@ static void inject_usb_suspend(void)
     if (s_usb.state_cb) s_usb.state_cb(USB_HID_SUSPENDED);
 }
 
+static void inject_usb_not_mounted(void)
+{
+    s_usb.state = USB_HID_NOT_MOUNTED;
+    if (s_usb.state_cb) s_usb.state_cb(USB_HID_NOT_MOUNTED);
+}
+
 /* ── Report builders ────────────────────────────────────────────────── */
 
 static gamepad_report_t make_idle_report(void)
@@ -892,6 +898,68 @@ void test_usb_report_all_buttons(void)
     TEST_ASSERT_EQUAL_UINT16(all_buttons, s_usb.last_report.buttons);
 }
 
+/* ── Guide press in non-wakeable states ─────────────────────────────── */
+
+void test_guide_press_no_op_when_on(void)
+{
+    /*
+     * Pressing guide while the PC is already ON must not trigger the
+     * power button or change the PC state.
+     */
+    inject_bt_connect();
+    drive_to_on(0);
+
+    int triggers_before = s_hal.power_btn_trigger_count;
+
+    gamepad_report_t guide = make_guide_report();
+    inject_bt_report(&guide);
+    device_tick(10000);
+
+    TEST_ASSERT_EQUAL(PC_STATE_ON, pc_power_sm_get_state(&s_sm));
+    TEST_ASSERT_EQUAL(triggers_before, s_hal.power_btn_trigger_count);
+}
+
+void test_guide_press_no_op_when_booting(void)
+{
+    /*
+     * Pressing guide while the PC is BOOTING (e.g. after the initial
+     * wake-up) must not fire a second power-button pulse.
+     */
+    inject_bt_connect();
+
+    /* First guide press: OFF → BOOTING */
+    gamepad_report_t guide = make_guide_report();
+    inject_bt_report(&guide);
+    device_tick(0);
+    TEST_ASSERT_EQUAL(PC_STATE_BOOTING, pc_power_sm_get_state(&s_sm));
+    TEST_ASSERT_EQUAL(1, s_hal.power_btn_trigger_count);
+
+    /* Guide still held — must not retrigger while BOOTING */
+    device_tick(1000);
+    device_tick(2000);
+
+    TEST_ASSERT_EQUAL(PC_STATE_BOOTING, pc_power_sm_get_state(&s_sm));
+    TEST_ASSERT_EQUAL(1, s_hal.power_btn_trigger_count);
+}
+
+/* ── USB NOT_MOUNTED path ────────────────────────────────────────────── */
+
+void test_usb_not_mounted_acts_as_suspend(void)
+{
+    /*
+     * USB_HID_NOT_MOUNTED (cable unplugged while running) should be
+     * treated identically to USB_HID_SUSPENDED: the state machine
+     * moves ON → SLEEPING.
+     */
+    drive_to_on(0);
+    TEST_ASSERT_EQUAL(PC_STATE_ON, pc_power_sm_get_state(&s_sm));
+
+    s_hal.millis = 10000;
+    inject_usb_not_mounted();
+
+    TEST_ASSERT_EQUAL(PC_STATE_SLEEPING, pc_power_sm_get_state(&s_sm));
+}
+
 /* ── PC shutdown ────────────────────────────────────────────────────── */
 
 void test_pc_shutdown_from_on_via_led_off(void)
@@ -1053,6 +1121,13 @@ int main(void)
     RUN_TEST(test_usb_report_all_dpad_directions);
     RUN_TEST(test_usb_report_extreme_stick_values);
     RUN_TEST(test_usb_report_all_buttons);
+
+    /* Guide press in non-wakeable states */
+    RUN_TEST(test_guide_press_no_op_when_on);
+    RUN_TEST(test_guide_press_no_op_when_booting);
+
+    /* USB NOT_MOUNTED path */
+    RUN_TEST(test_usb_not_mounted_acts_as_suspend);
 
     /* PC shutdown */
     RUN_TEST(test_pc_shutdown_from_on_via_led_off);

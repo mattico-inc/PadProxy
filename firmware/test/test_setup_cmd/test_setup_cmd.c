@@ -170,6 +170,49 @@ void test_set_boot_timeout_ms(void)
     TEST_ASSERT_EQUAL_UINT16(10000, cfg.boot_timeout_ms);
 }
 
+void test_set_boot_timeout_ms_at_min(void)
+{
+    char cmd[64];
+    snprintf(cmd, sizeof(cmd), "set boot_timeout_ms %d",
+             DEVICE_CONFIG_BOOT_TIMEOUT_MIN);
+    run(cmd);
+    assert_ok();
+    TEST_ASSERT_EQUAL_UINT16(DEVICE_CONFIG_BOOT_TIMEOUT_MIN,
+                             cfg.boot_timeout_ms);
+}
+
+void test_set_boot_timeout_ms_at_max(void)
+{
+    char cmd[64];
+    snprintf(cmd, sizeof(cmd), "set boot_timeout_ms %d",
+             DEVICE_CONFIG_BOOT_TIMEOUT_MAX);
+    run(cmd);
+    assert_ok();
+    TEST_ASSERT_EQUAL_UINT16(DEVICE_CONFIG_BOOT_TIMEOUT_MAX,
+                             cfg.boot_timeout_ms);
+}
+
+void test_set_boot_timeout_ms_too_low(void)
+{
+    char cmd[64];
+    snprintf(cmd, sizeof(cmd), "set boot_timeout_ms %d",
+             DEVICE_CONFIG_BOOT_TIMEOUT_MIN - 1);
+    run(cmd);
+    assert_err();
+    /* Value unchanged */
+    TEST_ASSERT_EQUAL_UINT16(DEVICE_CONFIG_DEFAULT_BOOT_TIMEOUT_MS,
+                             cfg.boot_timeout_ms);
+}
+
+void test_set_boot_timeout_ms_too_high(void)
+{
+    char cmd[64];
+    snprintf(cmd, sizeof(cmd), "set boot_timeout_ms %d",
+             DEVICE_CONFIG_BOOT_TIMEOUT_MAX + 1);
+    run(cmd);
+    assert_err();
+}
+
 void test_set_device_name(void)
 {
     run("set device_name MyPad");
@@ -181,6 +224,77 @@ void test_set_device_name_empty(void)
 {
     /* "set device_name " — value is empty string after key */
     run("set device_name ");
+    assert_err();
+}
+
+void test_set_wifi_ssid_at_max_length(void)
+{
+    char val[DEVICE_CONFIG_WIFI_SSID_MAX + 1];
+    char cmd[DEVICE_CONFIG_WIFI_SSID_MAX + 32];
+    memset(val, 'A', DEVICE_CONFIG_WIFI_SSID_MAX);
+    val[DEVICE_CONFIG_WIFI_SSID_MAX] = '\0';
+    snprintf(cmd, sizeof(cmd), "set wifi_ssid %s", val);
+    run(cmd);
+    assert_ok();
+    TEST_ASSERT_EQUAL_UINT(DEVICE_CONFIG_WIFI_SSID_MAX, strlen(cfg.wifi_ssid));
+}
+
+void test_set_wifi_ssid_too_long(void)
+{
+    char val[DEVICE_CONFIG_WIFI_SSID_MAX + 3];
+    char cmd[DEVICE_CONFIG_WIFI_SSID_MAX + 32];
+    memset(val, 'A', DEVICE_CONFIG_WIFI_SSID_MAX + 1);
+    val[DEVICE_CONFIG_WIFI_SSID_MAX + 1] = '\0';
+    snprintf(cmd, sizeof(cmd), "set wifi_ssid %s", val);
+    run(cmd);
+    assert_err();
+}
+
+void test_set_wifi_password_at_max_length(void)
+{
+    char val[DEVICE_CONFIG_WIFI_PASSWORD_MAX + 1];
+    char cmd[DEVICE_CONFIG_WIFI_PASSWORD_MAX + 32];
+    memset(val, 'B', DEVICE_CONFIG_WIFI_PASSWORD_MAX);
+    val[DEVICE_CONFIG_WIFI_PASSWORD_MAX] = '\0';
+    snprintf(cmd, sizeof(cmd), "set wifi_password %s", val);
+    run(cmd);
+    assert_ok();
+    TEST_ASSERT_EQUAL_UINT(DEVICE_CONFIG_WIFI_PASSWORD_MAX,
+                           strlen(cfg.wifi_password));
+}
+
+void test_set_wifi_password_too_long(void)
+{
+    char val[DEVICE_CONFIG_WIFI_PASSWORD_MAX + 3];
+    char cmd[DEVICE_CONFIG_WIFI_PASSWORD_MAX + 32];
+    memset(val, 'B', DEVICE_CONFIG_WIFI_PASSWORD_MAX + 1);
+    val[DEVICE_CONFIG_WIFI_PASSWORD_MAX + 1] = '\0';
+    snprintf(cmd, sizeof(cmd), "set wifi_password %s", val);
+    run(cmd);
+    assert_err();
+}
+
+void test_set_device_name_at_max_length(void)
+{
+    char val[DEVICE_CONFIG_DEVICE_NAME_MAX + 1];
+    char cmd[DEVICE_CONFIG_DEVICE_NAME_MAX + 32];
+    memset(val, 'C', DEVICE_CONFIG_DEVICE_NAME_MAX);
+    val[DEVICE_CONFIG_DEVICE_NAME_MAX] = '\0';
+    snprintf(cmd, sizeof(cmd), "set device_name %s", val);
+    run(cmd);
+    assert_ok();
+    TEST_ASSERT_EQUAL_UINT(DEVICE_CONFIG_DEVICE_NAME_MAX,
+                           strlen(cfg.device_name));
+}
+
+void test_set_device_name_too_long(void)
+{
+    char val[DEVICE_CONFIG_DEVICE_NAME_MAX + 3];
+    char cmd[DEVICE_CONFIG_DEVICE_NAME_MAX + 32];
+    memset(val, 'C', DEVICE_CONFIG_DEVICE_NAME_MAX + 1);
+    val[DEVICE_CONFIG_DEVICE_NAME_MAX + 1] = '\0';
+    snprintf(cmd, sizeof(cmd), "set device_name %s", val);
+    run(cmd);
     assert_err();
 }
 
@@ -373,8 +487,18 @@ int main(void)
     RUN_TEST(test_set_power_pulse_ms_too_high);
     RUN_TEST(test_set_power_pulse_ms_not_a_number);
     RUN_TEST(test_set_boot_timeout_ms);
+    RUN_TEST(test_set_boot_timeout_ms_at_min);
+    RUN_TEST(test_set_boot_timeout_ms_at_max);
+    RUN_TEST(test_set_boot_timeout_ms_too_low);
+    RUN_TEST(test_set_boot_timeout_ms_too_high);
     RUN_TEST(test_set_device_name);
     RUN_TEST(test_set_device_name_empty);
+    RUN_TEST(test_set_device_name_at_max_length);
+    RUN_TEST(test_set_device_name_too_long);
+    RUN_TEST(test_set_wifi_ssid_at_max_length);
+    RUN_TEST(test_set_wifi_ssid_too_long);
+    RUN_TEST(test_set_wifi_password_at_max_length);
+    RUN_TEST(test_set_wifi_password_too_long);
     RUN_TEST(test_set_unknown_key);
     RUN_TEST(test_set_no_value);
     RUN_TEST(test_set_no_key);

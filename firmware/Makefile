@@ -121,7 +121,7 @@ ARM_GDB     = $(ARM_TOOLCHAIN_BIN)/arm-none-eabi-gdb
 
 # ── Test binaries ────────────────────────────────────────────────────────
 
-TEST_BINS = $(TEST_BUILD_DIR)/test_pc_power_state $(TEST_BUILD_DIR)/test_gamepad $(TEST_BUILD_DIR)/test_ota_version $(TEST_BUILD_DIR)/test_device_config $(TEST_BUILD_DIR)/test_setup_cmd $(TEST_BUILD_DIR)/test_device_integration
+TEST_BINS = $(TEST_BUILD_DIR)/test_pc_power_state $(TEST_BUILD_DIR)/test_gamepad $(TEST_BUILD_DIR)/test_ota_version $(TEST_BUILD_DIR)/test_device_config $(TEST_BUILD_DIR)/test_setup_cmd $(TEST_BUILD_DIR)/test_device_integration $(TEST_BUILD_DIR)/test_bt_gamepad_convert
 
 # ── Firmware cmake arguments ─────────────────────────────────────────────
 
@@ -239,6 +239,9 @@ $(TEST_BUILD_DIR)/test_setup_cmd: test/test_setup_cmd/test_setup_cmd.c src/setup
 	$(CC) $(CFLAGS) -o $@ $^
 
 $(TEST_BUILD_DIR)/test_device_integration: test/test_device_integration/test_device_integration.c src/pc_power_state.c src/usb_hid_report.c $(UNITY_SRC) | $(TEST_BUILD_DIR)
+	$(CC) $(CFLAGS) -o $@ $^
+
+$(TEST_BUILD_DIR)/test_bt_gamepad_convert: test/test_bt_gamepad_convert/test_bt_gamepad_convert.c src/bt_gamepad_convert.c $(UNITY_SRC) | $(TEST_BUILD_DIR)
 	$(CC) $(CFLAGS) -o $@ $^
 
 $(TEST_BUILD_DIR):
