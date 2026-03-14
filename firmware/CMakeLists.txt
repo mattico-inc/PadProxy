@@ -60,9 +60,27 @@ add_executable(padproxy
     src/ota_update.c
     src/device_config.c
     src/setup_cmd.c
+    src/ir_protocol.c
+    src/ir_blaster.c
+    src/wifi_service.c
+    src/smarthome.c
 )
 
 target_include_directories(padproxy PRIVATE include src)
+
+# ── Smart home platform selection (optional) ──────────────────────────────
+set(SMARTHOME "" CACHE STRING "Smart home platform: hass, homekit, alexa (empty = HTTP only)")
+
+if(SMARTHOME STREQUAL "hass")
+    target_sources(padproxy PRIVATE src/smarthome_hass.c)
+    target_compile_definitions(padproxy PRIVATE SMARTHOME_HASS)
+    target_link_libraries(padproxy pico_lwip_mqtt)
+    message(STATUS "Smart home platform: Home Assistant (MQTT)")
+elseif(SMARTHOME STREQUAL "")
+    message(STATUS "Smart home platform: none (HTTP API only)")
+else()
+    message(WARNING "Unknown SMARTHOME value: ${SMARTHOME} — building HTTP only")
+endif()
 
 # ── OTA configuration (override with cmake -D flags) ────────────────────
 # WiFi credentials for OTA update checks
