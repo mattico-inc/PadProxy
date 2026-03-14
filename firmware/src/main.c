@@ -13,6 +13,10 @@
 #include "ota_update.h"
 #include "device_config.h"
 #include "setup_cmd.h"
+#include "wifi_service.h"
+#include "ir_blaster.h"
+#include "ir_protocol.h"
+#include "smarthome.h"
 
 /* ── Compile-time WiFi fallback ──────────────────────────────────────── */
 
@@ -63,6 +67,13 @@ static void dispatch_actions(uint32_t actions)
         printf("[padproxy] Triggering power button (%u ms)\n",
                s_config.power_pulse_ms);
         pc_power_hal_trigger_power_button(s_config.power_pulse_ms);
+
+        /* Auto-TV: send IR power-on when waking the PC */
+        if (s_config.ir_auto_tv) {
+            printf("[padproxy] Auto-TV: sending IR power code\n");
+            ir_blaster_send((ir_protocol_id_t)s_config.ir_protocol,
+                            s_config.ir_address, s_config.ir_command);
+        }
     }
     if (actions & PC_ACTION_START_BOOT_TIMER) {
         pc_power_hal_start_boot_timer(s_config.boot_timeout_ms);
@@ -70,6 +81,11 @@ static void dispatch_actions(uint32_t actions)
     if (actions & PC_ACTION_CANCEL_BOOT_TIMER) {
         pc_power_hal_cancel_boot_timer();
     }
+
+    /* Publish state changes to smart home */
+    const smarthome_platform_t *sh = smarthome_get_platform();
+    if (sh && sh->publish_pc_state)
+        sh->publish_pc_state(pc_power_sm_get_state(&s_power_sm));
 }
 
 /* ── Callbacks ───────────────────────────────────────────────────────── */
@@ -104,9 +120,95 @@ static void on_bt_event(uint8_t idx, bt_gamepad_state_t state)
 {
     if (state == BT_GAMEPAD_CONNECTED) {
         printf("[padproxy] Gamepad %d connected\n", idx);
+        /* WiFi/BT priority mode: disable WiFi during gameplay */
+        if (s_config.wifi_bt_priority)
+            wifi_service_disable();
     } else {
         printf("[padproxy] Gamepad %d disconnected\n", idx);
         s_prev_report_valid = false;
+        /* WiFi/BT priority mode: re-enable WiFi */
+        if (s_config.wifi_bt_priority)
+            wifi_service_enable();
+    }
+
+    /* Publish BT status to smart home */
+    const smarthome_platform_t *sh = smarthome_get_platform();
+    if (sh && sh->publish_bt_status)
+        sh->publish_bt_status(state == BT_GAMEPAD_CONNECTED);
+}
+
+/* ── WiFi API callbacks ─────────────────────────────────────────────────── */
+
+/**
+ * Handle actions triggered by the WiFi HTTP API.
+ */
+static void on_wifi_action(wifi_action_t action)
+{
+    uint32_t now = pc_power_hal_millis();
+    pc_power_result_t r;
+    pc_power_state_t pc_state = pc_power_sm_get_state(&s_power_sm);
+
+    switch (action) {
+    case WIFI_ACTION_POWER_TOGGLE:
+        if (pc_state == PC_STATE_OFF || pc_state == PC_STATE_SLEEPING) {
+            printf("[padproxy] WiFi API -> wake request\n");
+            r = pc_power_sm_process(&s_power_sm, PC_EVENT_WAKE_REQUESTED,
+                                    now);
+            dispatch_actions(r.actions);
+        }
+        break;
+    case WIFI_ACTION_IR_SEND:
+        printf("[padproxy] WiFi API -> IR send\n");
+        ir_blaster_send((ir_protocol_id_t)s_config.ir_protocol,
+                        s_config.ir_address, s_config.ir_command);
+        break;
+    }
+}
+
+/**
+ * Provide current device status to the WiFi HTTP API.
+ */
+static void on_wifi_status_query(wifi_device_status_t *status)
+{
+    status->pc_state    = pc_power_sm_get_state(&s_power_sm);
+    status->bt_connected = bt_gamepad_is_connected(0);
+    status->wifi_rssi   = wifi_service_get_rssi();
+    status->ir_enabled  = (s_config.ir_protocol < IR_PROTO_COUNT);
+    /* firmware_version is set later in main */
+}
+
+/**
+ * Handle commands from the smart home platform.
+ */
+static void on_smarthome_cmd(smarthome_cmd_t cmd)
+{
+    uint32_t now = pc_power_hal_millis();
+    pc_power_result_t r;
+    pc_power_state_t pc_state = pc_power_sm_get_state(&s_power_sm);
+
+    switch (cmd) {
+    case SMARTHOME_CMD_POWER_TOGGLE:
+    case SMARTHOME_CMD_POWER_ON:
+        if (pc_state == PC_STATE_OFF || pc_state == PC_STATE_SLEEPING) {
+            printf("[padproxy] Smart home -> wake request\n");
+            r = pc_power_sm_process(&s_power_sm, PC_EVENT_WAKE_REQUESTED,
+                                    now);
+            dispatch_actions(r.actions);
+        }
+        break;
+    case SMARTHOME_CMD_POWER_OFF:
+        if (pc_state == PC_STATE_ON) {
+            printf("[padproxy] Smart home -> shutdown request\n");
+            r = pc_power_sm_process(&s_power_sm, PC_EVENT_WAKE_REQUESTED,
+                                    now);
+            dispatch_actions(r.actions);
+        }
+        break;
+    case SMARTHOME_CMD_IR_SEND:
+        printf("[padproxy] Smart home -> IR send\n");
+        ir_blaster_send((ir_protocol_id_t)s_config.ir_protocol,
+                        s_config.ir_address, s_config.ir_command);
+        break;
     }
 }
 
@@ -264,9 +366,8 @@ int main(void)
     }
 
     /* Check for OTA firmware update over WiFi (before BT init).
-     * Uses the CYW43 radio for WiFi, then deinits so Bluepad32 can
-     * reinitialize it for Bluetooth.  Skipped instantly if no WiFi
-     * SSID is configured. */
+     * WiFi is kept alive after OTA for the persistent WiFi service.
+     * Skipped instantly if no WiFi SSID is configured. */
     ota_update_result_t ota = ota_update_check_and_apply(&wifi_creds);
     printf("[padproxy] OTA check result: %s\n", ota_update_result_name(ota));
 
@@ -306,6 +407,27 @@ int main(void)
     s_led_debounced = s_led_reading;
     s_led_changed_ms = 0;
 
+    /* Initialize IR blaster */
+    ir_blaster_init();
+
+    /* Initialize persistent WiFi service (HTTP API, mDNS) */
+    wifi_service_config_t wifi_svc_cfg = {
+        .ssid     = wifi_creds.ssid,
+        .password = wifi_creds.password,
+        .hostname = s_config.device_name,
+    };
+    wifi_service_init(&wifi_svc_cfg, on_wifi_action, on_wifi_status_query);
+
+    /* Initialize smart home platform (MQTT for Home Assistant, etc.) */
+    const smarthome_platform_t *sh = smarthome_get_platform();
+    if (sh && sh->init) {
+        if (sh->init(&s_config, on_smarthome_cmd)) {
+            printf("[padproxy] Smart home platform initialized\n");
+        } else {
+            printf("[padproxy] Smart home platform init failed (will retry)\n");
+        }
+    }
+
     /* Initialize USB HID gamepad + CDC setup serial */
     usb_hid_gamepad_init(on_usb_state_change);
 
@@ -325,14 +447,23 @@ int main(void)
         usb_hid_gamepad_task();
 
         /* Poll CDC setup serial */
-        snprintf(status_buf, sizeof(status_buf), "pc_state=%s bt_connected=%s",
+        snprintf(status_buf, sizeof(status_buf),
+                 "pc_state=%s bt_connected=%s wifi=%s",
                  pc_power_state_name(pc_power_sm_get_state(&s_power_sm)),
-                 bt_gamepad_get_report(0, NULL) ? "true" : "false");
+                 bt_gamepad_get_report(0, NULL) ? "true" : "false",
+                 wifi_state_name(wifi_service_get_state()));
         setup_cmd_set_status(status_buf);
         poll_cdc_setup();
 
         /* Poll hardware inputs (power LED, boot timer) */
         poll_hardware(now_ms);
+
+        /* Poll WiFi service (reconnection, HTTP serving) */
+        wifi_service_task(now_ms);
+
+        /* Poll smart home platform (MQTT keepalive, etc.) */
+        if (sh && sh->task)
+            sh->task(now_ms);
 
         /* Read BT gamepad and forward */
         gamepad_report_t report;

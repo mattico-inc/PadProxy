@@ -4,7 +4,7 @@
 /* ── Wire format ────────────────────────────────────────────────────── */
 
 #define CONFIG_MAGIC   0x50434647  /* "PCFG" */
-#define CONFIG_VERSION 1
+#define CONFIG_VERSION 2
 
 /*
  * Binary layout (fixed size):
@@ -24,7 +24,16 @@
     (DEVICE_CONFIG_WIFI_PASSWORD_MAX + 1) +          \
     2 + /* power_pulse_ms */                         \
     2 + /* boot_timeout_ms */                        \
-    (DEVICE_CONFIG_DEVICE_NAME_MAX + 1)              \
+    (DEVICE_CONFIG_DEVICE_NAME_MAX + 1) +            \
+    1 + /* ir_protocol */                            \
+    2 + /* ir_address */                             \
+    2 + /* ir_command */                             \
+    1 + /* ir_auto_tv */                             \
+    (DEVICE_CONFIG_MQTT_BROKER_MAX + 1) +            \
+    2 + /* mqtt_port */                              \
+    (DEVICE_CONFIG_MQTT_USERNAME_MAX + 1) +          \
+    (DEVICE_CONFIG_MQTT_PASSWORD_MAX + 1) +          \
+    1   /* wifi_bt_priority */                       \
 )
 #define TOTAL_SIZE (HEADER_SIZE + PAYLOAD_SIZE + CRC_SIZE)
 
@@ -84,6 +93,18 @@ void device_config_init(device_config_t *cfg)
     strncpy(cfg->device_name, DEVICE_CONFIG_DEFAULT_DEVICE_NAME,
             DEVICE_CONFIG_DEVICE_NAME_MAX);
     cfg->device_name[DEVICE_CONFIG_DEVICE_NAME_MAX] = '\0';
+
+    /* IR blaster defaults */
+    cfg->ir_protocol = DEVICE_CONFIG_DEFAULT_IR_PROTOCOL;
+    cfg->ir_address  = DEVICE_CONFIG_DEFAULT_IR_ADDRESS;
+    cfg->ir_command  = DEVICE_CONFIG_DEFAULT_IR_COMMAND;
+    cfg->ir_auto_tv  = 0;
+
+    /* MQTT defaults */
+    cfg->mqtt_port = DEVICE_CONFIG_DEFAULT_MQTT_PORT;
+
+    /* WiFi/BT coexistence */
+    cfg->wifi_bt_priority = 0;
 }
 
 bool device_config_validate(const device_config_t *cfg)
@@ -107,6 +128,22 @@ bool device_config_validate(const device_config_t *cfg)
     if (cfg->wifi_password[DEVICE_CONFIG_WIFI_PASSWORD_MAX] != '\0')
         return false;
     if (cfg->device_name[DEVICE_CONFIG_DEVICE_NAME_MAX] != '\0')
+        return false;
+
+    /* IR protocol must be valid */
+    if (cfg->ir_protocol >= 4) /* IR_PROTO_COUNT */
+        return false;
+
+    /* MQTT strings must be null-terminated */
+    if (cfg->mqtt_broker[DEVICE_CONFIG_MQTT_BROKER_MAX] != '\0')
+        return false;
+    if (cfg->mqtt_username[DEVICE_CONFIG_MQTT_USERNAME_MAX] != '\0')
+        return false;
+    if (cfg->mqtt_password[DEVICE_CONFIG_MQTT_PASSWORD_MAX] != '\0')
+        return false;
+
+    /* MQTT port range (0 means disabled) */
+    if (cfg->mqtt_port > 0 && cfg->mqtt_port < 1)
         return false;
 
     return true;
@@ -138,6 +175,24 @@ int device_config_serialize(const device_config_t *cfg,
 
     memcpy(p, cfg->device_name, DEVICE_CONFIG_DEVICE_NAME_MAX + 1);
     p += DEVICE_CONFIG_DEVICE_NAME_MAX + 1;
+
+    /* IR blaster fields (v2) */
+    *p++ = cfg->ir_protocol;
+    put_u16(p, cfg->ir_address);  p += 2;
+    put_u16(p, cfg->ir_command);  p += 2;
+    *p++ = cfg->ir_auto_tv;
+
+    /* MQTT fields (v2) */
+    memcpy(p, cfg->mqtt_broker, DEVICE_CONFIG_MQTT_BROKER_MAX + 1);
+    p += DEVICE_CONFIG_MQTT_BROKER_MAX + 1;
+    put_u16(p, cfg->mqtt_port); p += 2;
+    memcpy(p, cfg->mqtt_username, DEVICE_CONFIG_MQTT_USERNAME_MAX + 1);
+    p += DEVICE_CONFIG_MQTT_USERNAME_MAX + 1;
+    memcpy(p, cfg->mqtt_password, DEVICE_CONFIG_MQTT_PASSWORD_MAX + 1);
+    p += DEVICE_CONFIG_MQTT_PASSWORD_MAX + 1;
+
+    /* WiFi/BT coexistence (v2) */
+    *p++ = cfg->wifi_bt_priority;
 
     /* CRC over header + payload */
     uint32_t crc = crc32_update(0, buf, HEADER_SIZE + PAYLOAD_SIZE);
@@ -186,6 +241,25 @@ bool device_config_deserialize(device_config_t *cfg,
     tmp.boot_timeout_ms = get_u16(p); p += 2;
 
     memcpy(tmp.device_name, p, DEVICE_CONFIG_DEVICE_NAME_MAX + 1);
+    p += DEVICE_CONFIG_DEVICE_NAME_MAX + 1;
+
+    /* IR blaster fields (v2) */
+    tmp.ir_protocol = *p++;
+    tmp.ir_address  = get_u16(p); p += 2;
+    tmp.ir_command  = get_u16(p); p += 2;
+    tmp.ir_auto_tv  = *p++;
+
+    /* MQTT fields (v2) */
+    memcpy(tmp.mqtt_broker, p, DEVICE_CONFIG_MQTT_BROKER_MAX + 1);
+    p += DEVICE_CONFIG_MQTT_BROKER_MAX + 1;
+    tmp.mqtt_port = get_u16(p); p += 2;
+    memcpy(tmp.mqtt_username, p, DEVICE_CONFIG_MQTT_USERNAME_MAX + 1);
+    p += DEVICE_CONFIG_MQTT_USERNAME_MAX + 1;
+    memcpy(tmp.mqtt_password, p, DEVICE_CONFIG_MQTT_PASSWORD_MAX + 1);
+    p += DEVICE_CONFIG_MQTT_PASSWORD_MAX + 1;
+
+    /* WiFi/BT coexistence (v2) */
+    tmp.wifi_bt_priority = *p++;
 
     if (!device_config_validate(&tmp))
         return false;

@@ -84,6 +84,11 @@ The firmware follows a layered architecture with clear separation between hardwa
 | **Gamepad common** | `include/gamepad.h` | Canonical `gamepad_report_t` struct, button/dpad definitions |
 | **PC power state machine** | `src/pc_power_state.c`, `include/pc_power_state.h` | Pure-logic state machine (OFF/BOOTING/ON/SLEEPING) |
 | **PC power HAL** | `src/pc_power_hal.c`, `include/pc_power_hal.h` | RP2350 GPIO/timer implementation; interface mocked in tests |
+| **WiFi service** | `src/wifi_service.c`, `include/wifi_service.h` | Persistent WiFi connection, HTTP API, reconnection logic |
+| **IR protocol** | `src/ir_protocol.c`, `include/ir_protocol.h` | Pure-logic IR encoding (NEC, Samsung, Sony, RC5) |
+| **IR blaster** | `src/ir_blaster.c`, `include/ir_blaster.h` | GPIO/PIO driver for IR LED, sends encoded waveforms |
+| **Smart home** | `src/smarthome.c`, `include/smarthome.h` | Compile-time platform abstraction for smart home integration |
+| **Smart home (HASS)** | `src/smarthome_hass.c` | Home Assistant MQTT integration (optional, `-DSMARTHOME=hass`) |
 | **TinyUSB config** | `src/tusb_config.h` | USB device class configuration (HID only) |
 
 ### Data Flow
