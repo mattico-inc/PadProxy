@@ -121,12 +121,17 @@ ARM_GDB     = $(ARM_TOOLCHAIN_BIN)/arm-none-eabi-gdb
 
 # ── Test binaries ────────────────────────────────────────────────────────
 
-TEST_BINS = $(TEST_BUILD_DIR)/test_pc_power_state $(TEST_BUILD_DIR)/test_gamepad $(TEST_BUILD_DIR)/test_ota_version $(TEST_BUILD_DIR)/test_device_config $(TEST_BUILD_DIR)/test_setup_cmd $(TEST_BUILD_DIR)/test_device_integration $(TEST_BUILD_DIR)/test_bt_gamepad_convert
+TEST_BINS = $(TEST_BUILD_DIR)/test_pc_power_state $(TEST_BUILD_DIR)/test_gamepad $(TEST_BUILD_DIR)/test_ota_version $(TEST_BUILD_DIR)/test_device_config $(TEST_BUILD_DIR)/test_setup_cmd $(TEST_BUILD_DIR)/test_device_integration $(TEST_BUILD_DIR)/test_bt_gamepad_convert $(TEST_BUILD_DIR)/test_ir_protocol
 
 # ── Firmware cmake arguments ─────────────────────────────────────────────
 
+SMARTHOME ?=
+
 CMAKE_ARGS  = -DPICO_BOARD=pico2_w
 CMAKE_ARGS += -DPICO_SDK_PATH=$(abspath $(PICO_SDK_PATH))
+ifneq ($(SMARTHOME),)
+CMAKE_ARGS += -DSMARTHOME=$(SMARTHOME)
+endif
 
 # Auto-detect Pico mount point for flashing
 PICO_MOUNT ?= $(firstword $(wildcard /media/$(USER)/RP2350 /media/$(USER)/RPI-RP2 /run/media/$(USER)/RP2350 /run/media/$(USER)/RPI-RP2 /Volumes/RP2350 /Volumes/RPI-RP2))
@@ -242,6 +247,9 @@ $(TEST_BUILD_DIR)/test_device_integration: test/test_device_integration/test_dev
 	$(CC) $(CFLAGS) -o $@ $^
 
 $(TEST_BUILD_DIR)/test_bt_gamepad_convert: test/test_bt_gamepad_convert/test_bt_gamepad_convert.c src/bt_gamepad_convert.c $(UNITY_SRC) | $(TEST_BUILD_DIR)
+	$(CC) $(CFLAGS) -o $@ $^
+
+$(TEST_BUILD_DIR)/test_ir_protocol: test/test_ir_protocol/test_ir_protocol.c src/ir_protocol.c $(UNITY_SRC) | $(TEST_BUILD_DIR)
 	$(CC) $(CFLAGS) -o $@ $^
 
 $(TEST_BUILD_DIR):
