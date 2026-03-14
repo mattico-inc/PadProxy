@@ -41,6 +41,8 @@ but has limitations for a production custom board:
 | Secondary port | USB-C receptacle | USB-C receptacle |
 | Power mux | Diode OR (passive) | Active power mux IC |
 | USB connector legacy | 9-pin header + USB-C | USB-C only (drop 9-pin header) |
+| IR blaster | GPIO 5 + NPN + through-hole LED | GPIO + NPN + SMD IR LED (board-edge) |
+| WiFi | Persistent STA via CYW43439 | Same (via wireless module SPI) |
 
 ---
 
@@ -188,6 +190,8 @@ within 3.3V ADC range) so firmware can:
 Suggested GPIOs:
 | GPIO | Signal | Notes |
 |------|--------|-------|
+| 5 | IR_BLASTER | NPN transistor → IR LED (38 kHz carrier via PIO) |
+| 6 | IR_RECEIVER (optional) | TSOP38238 for future IR learning |
 | ADC0 (GPIO 26) | USB_NATIVE_VBUS_SENSE | Divider: 100kΩ / 47kΩ → ÷3.1 (5V → 1.6V) |
 | ADC1 (GPIO 27) | USB_PWR_VBUS_SENSE | Same divider |
 
