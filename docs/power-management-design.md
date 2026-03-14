@@ -438,6 +438,8 @@ Standard ATX front panel header:
 | Photo-MOSFET Optocoupler | TLP222A (or AQY212 / CPC1017N) | DIP-4/SOP-4 | Power button trigger (polarity-agnostic) | $0.60 |
 | Optocoupler (sense) | PC817 | DIP-4/SMD | Power LED sense (optically isolated) | $0.10 |
 | Addressable LED | WS2812B or SK6812 | 5050 | Status indicator (single-wire protocol) | $0.05 |
+| IR LED | TSAL6200 or VSLY5850 | 5mm/SMD | 940nm IR emitter for TV control | $0.10 |
+| NPN Transistor | 2N2222 or BC547 | TO-92/SOT-23 | IR LED current driver (~100mA) | $0.05 |
 
 ### Power Button Trigger Components
 
@@ -453,6 +455,15 @@ Standard ATX front panel header:
 | PC817 optocoupler | PC817 | 1 | Sense - detects power LED state (optically isolated) |
 | Resistor | 470Ω | 1 | Current limit for sense optocoupler LED input |
 | Resistor | 10kΩ | 1 | Pull-up for sense optocoupler output to Pico GPIO |
+
+### IR Blaster Components
+
+| Component | Value | Qty | Purpose |
+|-----------|-------|-----|---------|
+| IR LED | TSAL6200 | 1 | 940nm high-power IR emitter |
+| NPN transistor | 2N2222 / BC547 | 1 | Current driver for IR LED |
+| Resistor | 1kΩ | 1 | Base current limit for NPN transistor |
+| Resistor | 22Ω | 1 | IR LED current limit (~100mA peak at 3.3V) |
 
 ### Connectors
 
@@ -476,11 +487,11 @@ own front panel wires.
 
 | Category | Cost | Notes |
 |----------|------|-------|
-| Active components | ~$7.75 | MCU, optocouplers, LED |
-| Passive components | ~$0.15 | Resistors |
+| Active components | ~$7.90 | MCU, optocouplers, LED, IR LED, NPN transistor |
+| Passive components | ~$0.17 | Resistors (5× total) |
 | Connectors | ~$0.90 | USB header, USB-C, 4-pin header |
 | PCB (qty 5) | ~$2.00 each | |
-| **Total per unit** | **~$10.80** | |
+| **Total per unit** | **~$10.97** | |
 
 ---
 
@@ -493,6 +504,7 @@ own front panel wires.
 | 2 | PWR_BTN_TRIGGER | Output | Photo-MOSFET optocoupler drive (TLP222A LED) |
 | 3 | PWR_LED_SENSE | Input | PC817 output (active LOW = PC on, pull-up) |
 | 4 | STATUS_LED | Output | WS2812B addressable LED data line |
+| 5 | IR_BLASTER | Output | NPN transistor → IR LED (38 kHz carrier) |
 
 **USB:** Handled by the Pico 2 W module internally. USB D+/D- are routed from the
 module's castellated pads (or test points TP1/TP3) to the carrier PCB.
@@ -505,7 +517,8 @@ the onboard PCB antenna — no external antenna connector needed.
 1. **GPIO 2** - Power button trigger
 2. **GPIO 3** - Power LED sense (optocoupler output)
 3. **GPIO 4** - WS2812B addressable LED data
-4. **Avoid GPIO 0, 1** - Reserved for UART TX/RX (debug output)
+4. **GPIO 5** - IR blaster output (NPN transistor driver)
+5. **Avoid GPIO 0, 1** - Reserved for UART TX/RX (debug output)
 
 ---
 
@@ -629,6 +642,7 @@ for now due to wide availability and DIP-4 hand-soldering friendliness.
 | 0.3 | 2026-02-07 | Added 5V tolerance protection (Zener clamp on LED sense). Added optional reset trigger circuit (DNP). Dual-footprint connectors (headers + screw terminals). Resolved design questions D1-D4. Updated BOM and GPIO table. |
 | 0.4 | 2026-02-21 | Migrated from ESP32-S3-WROOM-1 to Raspberry Pi Pico 2 W (RP2350). Removed external LDO and antenna connector. Updated GPIO assignments, power budget, BOM, and all circuit descriptions. |
 | 0.5 | 2026-02-22 | Simplified front panel interface: removed power button sense circuit (bridge rectifier + PC817), replaced LED Zener clamp with PC817 optocoupler for full optical isolation, 4-wire cable design (PWR_BTN trigger + PWR_LED sense). Removed reset trigger, OLED header. Replaced discrete RGB LEDs with WS2812B addressable LED. Reduced GPIO count from 8 to 3. Updated BOM, connector specs, design decisions D1-D7. |
+| 0.6 | 2026-03-14 | Added IR blaster circuit (GPIO 5, NPN transistor + IR LED) for TV power control. Added IR components to BOM. GPIO count now 4. See [wifi-ir-smarthome-design.md](wifi-ir-smarthome-design.md) for WiFi service, IR protocol, and smart home integration details. |
 
 **Note:** PCB v2 (custom RP2350B, separate wireless module, USB-C only, active power mux)
 is tracked in [pcb-v2-design.md](pcb-v2-design.md).
