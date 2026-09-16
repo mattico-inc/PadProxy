@@ -215,3 +215,30 @@ void bt_gamepad_set_pairing(bool enabled)
         uni_bt_stop_scanning_unsafe();
     }
 }
+
+void bt_gamepad_disconnect(uint8_t idx)
+{
+    if (idx >= BT_GAMEPAD_MAX)
+        return;
+
+    critical_section_enter_blocking(&s_lock);
+    bool was_connected = s_connected[idx];
+    critical_section_exit(&s_lock);
+
+    if (!was_connected)
+        return;
+
+    /*
+     * Disconnect the active controller via Bluepad32.
+     * We iterate through all devices and disconnect the first connected one.
+     * With BT_GAMEPAD_MAX == 1, there's at most one controller.
+     */
+    for (int i = 0; i < CONFIG_BLUEPAD32_MAX_DEVICES; i++) {
+        uni_hid_device_t* device = uni_hid_device_get_instance_for_idx(i);
+        if (device && uni_bt_conn_is_connected(&device->conn)) {
+            uni_hid_device_disconnect(device);
+            /* platform_on_device_disconnected() will be called by Bluepad32 */
+            return;
+        }
+    }
+}

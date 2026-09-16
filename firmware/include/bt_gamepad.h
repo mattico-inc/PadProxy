@@ -63,4 +63,14 @@ bool bt_gamepad_get_report(uint8_t idx, gamepad_report_t *report);
  */
 void bt_gamepad_set_pairing(bool enabled);
 
+/**
+ * Disconnect a connected Bluetooth gamepad.
+ *
+ * Called when the PC powers off to save controller battery and allow it
+ * to pair with other devices. The controller will auto-sleep after disconnect.
+ *
+ * @param idx  Gamepad slot (0-based, must be < BT_GAMEPAD_MAX).
+ */
+void bt_gamepad_disconnect(uint8_t idx);
+
 #endif /* BT_GAMEPAD_H */

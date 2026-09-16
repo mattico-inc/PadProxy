@@ -128,6 +128,7 @@ static void poll_hardware(uint32_t now_ms)
 {
     bool led = pc_power_hal_read_power_led();
     pc_power_result_t r;
+    pc_power_state_t prev_state = pc_power_sm_get_state(&s_power_sm);
 
     /* Reset debounce timer whenever the raw reading changes */
     if (led != s_led_reading) {
@@ -147,12 +148,34 @@ static void poll_hardware(uint32_t now_ms)
                                     now_ms);
         }
         dispatch_actions(r.actions);
+
+        /*
+         * Disconnect controller when PC powers off.
+         * This saves controller battery and allows it to pair with other devices.
+         * Only disconnect when we transition TO off, not if we were already off.
+         */
+        pc_power_state_t new_state = pc_power_sm_get_state(&s_power_sm);
+        if (new_state == PC_STATE_OFF && prev_state != PC_STATE_OFF) {
+            if (bt_gamepad_is_connected(0)) {
+                printf("[padproxy] PC powered off (LED stable) -> disconnecting controller\n");
+                bt_gamepad_disconnect(0);
+            }
+        }
     }
 
     /* Boot timer expiry */
     if (pc_power_hal_boot_timer_expired()) {
         r = pc_power_sm_process(&s_power_sm, PC_EVENT_BOOT_TIMEOUT, now_ms);
         dispatch_actions(r.actions);
+
+        /* Also disconnect on boot timeout (BOOTING → OFF transition) */
+        pc_power_state_t new_state = pc_power_sm_get_state(&s_power_sm);
+        if (new_state == PC_STATE_OFF && prev_state != PC_STATE_OFF) {
+            if (bt_gamepad_is_connected(0)) {
+                printf("[padproxy] Boot timeout -> disconnecting controller\n");
+                bt_gamepad_disconnect(0);
+            }
+        }
     }
 }
 
@@ -242,15 +265,15 @@ int main(void)
     stdio_init_all();
     printf("[padproxy] PadProxy starting\n");
 
-    /* Accept this image immediately so the boot ROM does not roll back
-     * a TBYB (Try Before You Buy) flash-update boot.  Must happen
-     * within ~16.7 s of reset — do it first thing. */
-    ota_accept_current_image();
-
     /* Load device config before OTA so WiFi credentials are available.
-     * Falls back to compiled-in defaults on first boot or flash error. */
-    device_config_init(&s_config);
-    /* TODO: attempt device_config_deserialize() from flash sector */
+    * Falls back to compiled-in defaults on first boot or flash error. */
+   device_config_init(&s_config);
+   /* TODO: attempt device_config_deserialize() from flash sector */
+
+   /* Accept this image immediately so the boot ROM does not roll back
+    * a TBYB (Try Before You Buy) flash-update boot.  Must happen
+    * within ~16.7 s of reset — do it first thing. */
+   ota_accept_current_image();
 
     /* Build WiFi credentials: prefer runtime config, fall back to
      * compile-time defines (which may be empty). */

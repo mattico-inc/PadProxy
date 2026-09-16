@@ -32,12 +32,15 @@
 #define DEVICE_CONFIG_BOOT_TIMEOUT_MAX  60000
 
 typedef struct {
+    uint32_t version; /* For future compatibility checks */
     char     wifi_ssid[DEVICE_CONFIG_WIFI_SSID_MAX + 1];
     char     wifi_password[DEVICE_CONFIG_WIFI_PASSWORD_MAX + 1];
     uint16_t power_pulse_ms;
     uint16_t boot_timeout_ms;
     char     device_name[DEVICE_CONFIG_DEVICE_NAME_MAX + 1];
-} device_config_t;
+} device_config_v1_t;
+
+typedef device_config_v1_t device_config_t;
 
 /**
  * Initialize a config struct with compiled-in defaults.
