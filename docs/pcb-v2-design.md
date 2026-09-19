@@ -142,7 +142,10 @@ A passive diode OR (v1 approach) has drawbacks:
 V2 uses an **active power mux IC** to select between the two supplies with zero forward
 voltage drop, intelligent priority, and backfeed blocking.
 
-**Recommended part:** TPS2116 (Texas Instruments) or equivalent.
+**Recommended part:** TPS2116 (Texas Instruments) or equivalent. (The same IC is also
+being retrofitted onto the existing v1 Pico 2 W carrier board — see
+[power-management-design.md](power-management-design.md#active-power-mux) — though that
+single-mux, single-USB-C-port version differs from the dual-port design below.)
 
 Key properties:
 - Automatic priority selection (higher-voltage input wins, or fixed priority via SEL pin).

@@ -3,6 +3,7 @@
 
 #include "pico/stdlib.h"
 #include "pico/time.h"
+#include "hardware/watchdog.h"
 #include "tusb.h"
 
 #include "gamepad.h"
@@ -12,6 +13,7 @@
 #include "pc_power_hal.h"
 #include "ota_update.h"
 #include "device_config.h"
+#include "device_config_flash.h"
 #include "setup_cmd.h"
 #include "wifi_service.h"
 #include "ir_blaster.h"
@@ -33,12 +35,13 @@ static pc_power_sm_t s_power_sm;
 static device_config_t s_config;
 
 /**
- * Previous gamepad report, used to detect edges (e.g. guide button press).
- * Sending the same unchanged report repeatedly is fine for USB HID, but
- * we only want to fire a wake event on the *press* edge, not every poll.
+ * Previous gamepad report per BT slot, used to detect edges (e.g. guide
+ * button press). Sending the same unchanged report repeatedly is fine for
+ * USB HID, but we only want to fire a wake event on the *press* edge, not
+ * every poll.
  */
-static gamepad_report_t s_prev_report;
-static bool s_prev_report_valid;
+static gamepad_report_t s_prev_report[BT_DEVICE_MAX];
+static bool s_prev_report_valid[BT_DEVICE_MAX];
 
 /* ── CDC setup serial ───────────────────────────────────────────────── */
 
@@ -91,10 +94,35 @@ static void dispatch_actions(uint32_t actions)
 /* ── Callbacks ───────────────────────────────────────────────────────── */
 
 /**
+ * True when the PC (or, in HID_RECEIVER mode, the connected USB host) is
+ * ready to receive HID input.
+ *
+ * DEVICE_MODE_PC_PROXY:    gated on the pc_power_sm reaching PC_STATE_ON.
+ * DEVICE_MODE_HID_RECEIVER: no PC to gate on -- forward as soon as USB is
+ *                           enumerated (there's no front-panel wiring to
+ *                           sense in this mode).
+ */
+static bool pc_ready_for_input(void)
+{
+    if (s_config.device_mode == DEVICE_MODE_HID_RECEIVER) {
+        return usb_hid_gamepad_get_state() == USB_HID_MOUNTED;
+    }
+    return pc_power_sm_get_state(&s_power_sm) == PC_STATE_ON;
+}
+
+/**
  * USB state change → power state machine events.
+ *
+ * Only meaningful in DEVICE_MODE_PC_PROXY; in DEVICE_MODE_HID_RECEIVER
+ * there's no PC power state to track, so this is a no-op and
+ * pc_ready_for_input() checks the USB state directly instead.
  */
 static void on_usb_state_change(usb_hid_state_t state)
 {
+    if (s_config.device_mode != DEVICE_MODE_PC_PROXY) {
+        return;
+    }
+
     uint32_t now = pc_power_hal_millis();
     pc_power_result_t r;
 
@@ -114,18 +142,21 @@ static void on_usb_state_change(usb_hid_state_t state)
 }
 
 /**
- * Bluetooth gamepad connection events.
+ * Bluetooth HID device connection events (gamepad, mouse, or keyboard).
  */
 static void on_bt_event(uint8_t idx, bt_gamepad_state_t state)
 {
     if (state == BT_GAMEPAD_CONNECTED) {
-        printf("[padproxy] Gamepad %d connected\n", idx);
+        printf("[padproxy] Device %d connected (class=%d)\n",
+               idx, bt_gamepad_get_class(idx));
         /* WiFi/BT priority mode: disable WiFi during gameplay */
         if (s_config.wifi_bt_priority)
             wifi_service_disable();
     } else {
-        printf("[padproxy] Gamepad %d disconnected\n", idx);
-        s_prev_report_valid = false;
+        printf("[padproxy] Device %d disconnected\n", idx);
+        if (idx < BT_DEVICE_MAX) {
+            s_prev_report_valid[idx] = false;
+        }
         /* WiFi/BT priority mode: re-enable WiFi */
         if (s_config.wifi_bt_priority)
             wifi_service_enable();
@@ -252,15 +283,17 @@ static void poll_hardware(uint32_t now_ms)
         dispatch_actions(r.actions);
 
         /*
-         * Disconnect controller when PC powers off.
-         * This saves controller battery and allows it to pair with other devices.
+         * Disconnect all connected BT devices when PC powers off.
+         * This saves battery and allows them to pair with other devices.
          * Only disconnect when we transition TO off, not if we were already off.
          */
         pc_power_state_t new_state = pc_power_sm_get_state(&s_power_sm);
         if (new_state == PC_STATE_OFF && prev_state != PC_STATE_OFF) {
-            if (bt_gamepad_is_connected(0)) {
-                printf("[padproxy] PC powered off (LED stable) -> disconnecting controller\n");
-                bt_gamepad_disconnect(0);
+            for (uint8_t i = 0; i < BT_DEVICE_MAX; i++) {
+                if (bt_gamepad_is_connected(i)) {
+                    printf("[padproxy] PC powered off (LED stable) -> disconnecting device %d\n", i);
+                    bt_gamepad_disconnect(i);
+                }
             }
         }
     }
@@ -273,9 +306,11 @@ static void poll_hardware(uint32_t now_ms)
         /* Also disconnect on boot timeout (BOOTING → OFF transition) */
         pc_power_state_t new_state = pc_power_sm_get_state(&s_power_sm);
         if (new_state == PC_STATE_OFF && prev_state != PC_STATE_OFF) {
-            if (bt_gamepad_is_connected(0)) {
-                printf("[padproxy] Boot timeout -> disconnecting controller\n");
-                bt_gamepad_disconnect(0);
+            for (uint8_t i = 0; i < BT_DEVICE_MAX; i++) {
+                if (bt_gamepad_is_connected(i)) {
+                    printf("[padproxy] Boot timeout -> disconnecting device %d\n", i);
+                    bt_gamepad_disconnect(i);
+                }
             }
         }
     }
@@ -310,12 +345,14 @@ static void poll_cdc_setup(void)
 
             if (r.action == SETUP_ACTION_SAVE) {
                 printf("[setup] Saving config to flash\n");
-                /* TODO: persist s_config to flash sector */
+                if (!device_config_flash_save(&s_config)) {
+                    printf("[setup] ERROR: failed to save config to flash\n");
+                }
             } else if (r.action == SETUP_ACTION_REBOOT) {
                 printf("[setup] Rebooting...\n");
                 tud_cdc_write_flush();
                 sleep_ms(100);
-                /* TODO: watchdog_reboot() or rom reboot */
+                watchdog_reboot(0, 0, 0);
             }
 
             s_cdc_line_pos = 0;
@@ -329,37 +366,45 @@ static void poll_cdc_setup(void)
 /* ── Main loop ───────────────────────────────────────────────────────── */
 
 /**
- * Process one gamepad report: check for wake triggers, forward to USB.
+ * Process one gamepad report from a given BT slot: check for wake
+ * triggers, forward to USB.
  */
-static void process_gamepad(const gamepad_report_t *report, uint32_t now_ms)
+static void process_gamepad(uint8_t idx, const gamepad_report_t *report,
+                            uint32_t now_ms)
 {
-    pc_power_state_t pc_state = pc_power_sm_get_state(&s_power_sm);
-
     /*
-     * Wake-on-controller: fire WAKE_REQUESTED on the *rising edge* of
-     * the guide button when the PC is off or sleeping.
+     * Wake-on-controller only applies in DEVICE_MODE_PC_PROXY: there's no
+     * PC to wake (and no LED/button wiring to sense) in HID_RECEIVER mode.
      */
-    bool guide_now  = gamepad_report_guide_pressed(report);
-    bool guide_prev = s_prev_report_valid &&
-                      gamepad_report_guide_pressed(&s_prev_report);
+    if (s_config.device_mode == DEVICE_MODE_PC_PROXY) {
+        pc_power_state_t pc_state = pc_power_sm_get_state(&s_power_sm);
 
-    if (guide_now && !guide_prev) {
-        if (pc_state == PC_STATE_OFF || pc_state == PC_STATE_SLEEPING) {
-            printf("[padproxy] Guide button -> wake request (PC %s)\n",
-                     pc_power_state_name(pc_state));
-            pc_power_result_t r = pc_power_sm_process(
-                &s_power_sm, PC_EVENT_WAKE_REQUESTED, now_ms);
-            dispatch_actions(r.actions);
+        /*
+         * Wake-on-controller: fire WAKE_REQUESTED on the *rising edge* of
+         * the guide button when the PC is off or sleeping.
+         */
+        bool guide_now  = gamepad_report_guide_pressed(report);
+        bool guide_prev = s_prev_report_valid[idx] &&
+                          gamepad_report_guide_pressed(&s_prev_report[idx]);
+
+        if (guide_now && !guide_prev) {
+            if (pc_state == PC_STATE_OFF || pc_state == PC_STATE_SLEEPING) {
+                printf("[padproxy] Guide button -> wake request (PC %s)\n",
+                         pc_power_state_name(pc_state));
+                pc_power_result_t r = pc_power_sm_process(
+                    &s_power_sm, PC_EVENT_WAKE_REQUESTED, now_ms);
+                dispatch_actions(r.actions);
+            }
         }
     }
 
-    /* Forward to USB only when the PC is on and USB is enumerated. */
-    if (pc_state == PC_STATE_ON) {
+    /* Forward to USB only when the PC/host is ready for input. */
+    if (pc_ready_for_input()) {
         usb_hid_gamepad_send_report(report);
     }
 
-    s_prev_report = *report;
-    s_prev_report_valid = true;
+    s_prev_report[idx] = *report;
+    s_prev_report_valid[idx] = true;
 }
 
 int main(void)
@@ -370,7 +415,11 @@ int main(void)
     /* Load device config before OTA so WiFi credentials are available.
     * Falls back to compiled-in defaults on first boot or flash error. */
    device_config_init(&s_config);
-   /* TODO: attempt device_config_deserialize() from flash sector */
+   if (device_config_flash_load(&s_config)) {
+       printf("[padproxy] Loaded device config from flash\n");
+   } else {
+       printf("[padproxy] No valid config in flash, using defaults\n");
+   }
 
    /* Accept this image immediately so the boot ROM does not roll back
     * a TBYB (Try Before You Buy) flash-update boot.  Must happen
@@ -423,12 +472,18 @@ int main(void)
              PADPROXY_VERSION_PATCH);
     setup_cmd_set_version(version_str);
 
-    /* Initialize power management */
-    pc_power_hal_init();
+    /* Initialize power management.
+     * pc_power_sm_init() is pure logic and harmless to call in either
+     * mode. The GPIO-backed HAL init and LED state are only meaningful
+     * in DEVICE_MODE_PC_PROXY -- HID_RECEIVER mode has no front-panel
+     * wiring to read. */
     pc_power_sm_init(&s_power_sm);
-    s_led_reading   = pc_power_hal_read_power_led();
-    s_led_debounced = s_led_reading;
-    s_led_changed_ms = 0;
+    if (s_config.device_mode == DEVICE_MODE_PC_PROXY) {
+        pc_power_hal_init();
+        s_led_reading   = pc_power_hal_read_power_led();
+        s_led_debounced = s_led_reading;
+        s_led_changed_ms = 0;
+    }
 
     /* Initialize IR blaster */
     ir_blaster_init();
@@ -471,15 +526,20 @@ int main(void)
 
         /* Poll CDC setup serial */
         snprintf(status_buf, sizeof(status_buf),
-                 "pc_state=%s bt_connected=%s wifi=%s",
+                 "pc_state=%s bt_connected=%s device_mode=%s wifi=%s",
                  pc_power_state_name(pc_power_sm_get_state(&s_power_sm)),
-                 bt_gamepad_get_report(0, NULL) ? "true" : "false",
+                 bt_gamepad_is_connected(0) ? "true" : "false",
+                 s_config.device_mode == DEVICE_MODE_HID_RECEIVER
+                     ? "hid_receiver" : "pc_proxy",
                  wifi_state_name(wifi_service_get_state()));
         setup_cmd_set_status(status_buf);
         poll_cdc_setup();
 
-        /* Poll hardware inputs (power LED, boot timer) */
-        poll_hardware(now_ms);
+        /* Poll hardware inputs (power LED, boot timer) -- PC_PROXY only;
+         * HID_RECEIVER has no front-panel wiring to sense. */
+        if (s_config.device_mode == DEVICE_MODE_PC_PROXY) {
+            poll_hardware(now_ms);
+        }
 
         /* Poll WiFi service (reconnection, HTTP serving) */
         wifi_service_task(now_ms);
@@ -488,10 +548,36 @@ int main(void)
         if (sh && sh->task)
             sh->task(now_ms);
 
-        /* Read BT gamepad and forward */
-        gamepad_report_t report;
-        if (bt_gamepad_get_report(0, &report)) {
-            process_gamepad(&report, now_ms);
+        /* Read BT devices (gamepad/mouse/keyboard, any mix) and forward. */
+        for (uint8_t idx = 0; idx < BT_DEVICE_MAX; idx++) {
+            switch (bt_gamepad_get_class(idx)) {
+            case BT_DEVICE_CLASS_GAMEPAD: {
+                gamepad_report_t report;
+                if (bt_gamepad_get_report(idx, &report)) {
+                    process_gamepad(idx, &report, now_ms);
+                }
+                break;
+            }
+            case BT_DEVICE_CLASS_MOUSE: {
+                usb_mouse_report_t report;
+                if (bt_gamepad_get_mouse_report(idx, &report) &&
+                    pc_ready_for_input()) {
+                    usb_hid_mouse_send_report(&report);
+                }
+                break;
+            }
+            case BT_DEVICE_CLASS_KEYBOARD: {
+                usb_keyboard_report_t report;
+                if (bt_gamepad_get_keyboard_report(idx, &report) &&
+                    pc_ready_for_input()) {
+                    usb_hid_keyboard_send_report(&report);
+                }
+                break;
+            }
+            case BT_DEVICE_CLASS_NONE:
+            default:
+                break;
+            }
         }
 
         /* ~1ms loop period for responsive input */

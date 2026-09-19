@@ -21,7 +21,9 @@ static usb_hid_state_t    s_state = USB_HID_NOT_MOUNTED;
 #define USB_PID   0x0001
 
 enum {
-    ITF_NUM_HID,
+    ITF_NUM_HID_GAMEPAD,
+    ITF_NUM_HID_MOUSE,
+    ITF_NUM_HID_KEYBOARD,
     ITF_NUM_CDC,
     ITF_NUM_CDC_DATA,
     ITF_NUM_TOTAL,
@@ -48,28 +50,53 @@ static const tusb_desc_device_t desc_device = {
     .bNumConfigurations = 1,
 };
 
-#define EPNUM_HID         0x81
-#define EPNUM_CDC_NOTIF   0x82
-#define EPNUM_CDC_OUT     0x03
-#define EPNUM_CDC_IN      0x83
+#define EPNUM_HID_GAMEPAD   0x81
+#define EPNUM_HID_MOUSE     0x82
+#define EPNUM_HID_KEYBOARD  0x83
+#define EPNUM_CDC_NOTIF     0x84
+#define EPNUM_CDC_OUT       0x05
+#define EPNUM_CDC_IN        0x85
 
-#define CONFIG_TOTAL_LEN  (TUD_CONFIG_DESC_LEN + TUD_HID_DESC_LEN + \
+/*
+ * Mouse and keyboard report descriptors use TinyUSB's ready-made,
+ * boot-compatible templates rather than hand-rolled bytes (unlike the
+ * gamepad descriptor below, which predates this composite layout and is
+ * kept hand-written so it stays host-testable without a TinyUSB include).
+ */
+static const uint8_t desc_hid_report_mouse[] = {
+    TUD_HID_REPORT_DESC_MOUSE()
+};
+
+static const uint8_t desc_hid_report_keyboard[] = {
+    TUD_HID_REPORT_DESC_KEYBOARD()
+};
+
+#define CONFIG_TOTAL_LEN  (TUD_CONFIG_DESC_LEN + (TUD_HID_DESC_LEN * 3) + \
                            TUD_CDC_DESC_LEN)
 
 static const uint8_t desc_configuration[] = {
     TUD_CONFIG_DESCRIPTOR(1, ITF_NUM_TOTAL, 0, CONFIG_TOTAL_LEN,
                           TUSB_DESC_CONFIG_ATT_REMOTE_WAKEUP, 100),
-    TUD_HID_DESCRIPTOR(ITF_NUM_HID, 0, HID_ITF_PROTOCOL_NONE,
-                       USB_HID_REPORT_DESCRIPTOR_LEN, EPNUM_HID,
+    TUD_HID_DESCRIPTOR(ITF_NUM_HID_GAMEPAD, 0, HID_ITF_PROTOCOL_NONE,
+                       USB_HID_REPORT_DESCRIPTOR_LEN, EPNUM_HID_GAMEPAD,
+                       CFG_TUD_HID_EP_BUFSIZE, 1),
+    TUD_HID_DESCRIPTOR(ITF_NUM_HID_MOUSE, 0, HID_ITF_PROTOCOL_MOUSE,
+                       sizeof(desc_hid_report_mouse), EPNUM_HID_MOUSE,
+                       CFG_TUD_HID_EP_BUFSIZE, 1),
+    TUD_HID_DESCRIPTOR(ITF_NUM_HID_KEYBOARD, 0, HID_ITF_PROTOCOL_KEYBOARD,
+                       sizeof(desc_hid_report_keyboard), EPNUM_HID_KEYBOARD,
                        CFG_TUD_HID_EP_BUFSIZE, 1),
     TUD_CDC_DESCRIPTOR(ITF_NUM_CDC, 4, EPNUM_CDC_NOTIF, 8,
                        EPNUM_CDC_OUT, EPNUM_CDC_IN, 64),
 };
 
+_Static_assert(sizeof(desc_configuration) == CONFIG_TOTAL_LEN,
+               "CONFIG_TOTAL_LEN does not match desc_configuration size");
+
 static const char *desc_strings[] = {
     [0] = "",                   /* Language (handled by TinyUSB) */
     [1] = "PadProxy",          /* Manufacturer */
-    [2] = "PadProxy Gamepad",  /* Product */
+    [2] = "PadProxy",          /* Product */
     [3] = "000001",            /* Serial */
     [4] = "PadProxy Setup",    /* CDC interface name */
 };
@@ -121,8 +148,16 @@ uint16_t const *tud_descriptor_string_cb(uint8_t index, uint16_t langid)
 
 uint8_t const *tud_hid_descriptor_report_cb(uint8_t instance)
 {
-    (void)instance;
-    return usb_hid_report_descriptor;
+    switch (instance) {
+    case ITF_NUM_HID_GAMEPAD:
+        return usb_hid_report_descriptor;
+    case ITF_NUM_HID_MOUSE:
+        return desc_hid_report_mouse;
+    case ITF_NUM_HID_KEYBOARD:
+        return desc_hid_report_keyboard;
+    default:
+        return NULL;
+    }
 }
 
 /* ── TinyUSB HID callbacks ───────────────────────────────────────────── */
@@ -207,13 +242,29 @@ void usb_hid_gamepad_task(void)
 
 bool usb_hid_gamepad_send_report(const gamepad_report_t *report)
 {
-    if (!tud_mounted() || !tud_hid_ready())
+    if (!tud_mounted() || !tud_hid_n_ready(ITF_NUM_HID_GAMEPAD))
         return false;
 
     usb_gamepad_report_t usb_report;
     usb_hid_report_from_gamepad(report, &usb_report);
 
-    return tud_hid_report(0, &usb_report, sizeof(usb_report));
+    return tud_hid_n_report(ITF_NUM_HID_GAMEPAD, 0, &usb_report, sizeof(usb_report));
+}
+
+bool usb_hid_mouse_send_report(const usb_mouse_report_t *report)
+{
+    if (!tud_mounted() || !tud_hid_n_ready(ITF_NUM_HID_MOUSE))
+        return false;
+
+    return tud_hid_n_report(ITF_NUM_HID_MOUSE, 0, report, sizeof(*report));
+}
+
+bool usb_hid_keyboard_send_report(const usb_keyboard_report_t *report)
+{
+    if (!tud_mounted() || !tud_hid_n_ready(ITF_NUM_HID_KEYBOARD))
+        return false;
+
+    return tud_hid_n_report(ITF_NUM_HID_KEYBOARD, 0, report, sizeof(*report));
 }
 
 usb_hid_state_t usb_hid_gamepad_get_state(void)

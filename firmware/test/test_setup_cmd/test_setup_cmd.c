@@ -84,6 +84,12 @@ void test_get_device_name(void)
     TEST_ASSERT_EQUAL_STRING("OK PadProxy\n", out);
 }
 
+void test_get_device_mode_default(void)
+{
+    run("get device_mode");
+    TEST_ASSERT_EQUAL_STRING("OK pc_proxy\n", out);
+}
+
 void test_get_unknown_key(void)
 {
     run("get nonexistent");
@@ -298,6 +304,28 @@ void test_set_device_name_too_long(void)
     assert_err();
 }
 
+void test_set_device_mode_hid_receiver(void)
+{
+    run("set device_mode hid_receiver");
+    assert_ok();
+    TEST_ASSERT_EQUAL_UINT8(DEVICE_MODE_HID_RECEIVER, cfg.device_mode);
+}
+
+void test_set_device_mode_pc_proxy(void)
+{
+    cfg.device_mode = DEVICE_MODE_HID_RECEIVER;
+    run("set device_mode pc_proxy");
+    assert_ok();
+    TEST_ASSERT_EQUAL_UINT8(DEVICE_MODE_PC_PROXY, cfg.device_mode);
+}
+
+void test_set_device_mode_invalid(void)
+{
+    run("set device_mode bogus");
+    assert_err();
+    TEST_ASSERT_EQUAL_UINT8(DEVICE_MODE_PC_PROXY, cfg.device_mode);
+}
+
 void test_set_unknown_key(void)
 {
     run("set nonexistent value");
@@ -341,6 +369,7 @@ void test_list_contains_all_keys(void)
     TEST_ASSERT_NOT_NULL(strstr(out, "power_pulse_ms="));
     TEST_ASSERT_NOT_NULL(strstr(out, "boot_timeout_ms="));
     TEST_ASSERT_NOT_NULL(strstr(out, "device_name="));
+    TEST_ASSERT_NOT_NULL(strstr(out, "device_mode="));
 }
 
 void test_list_shows_current_values(void)
@@ -474,6 +503,7 @@ int main(void)
     RUN_TEST(test_get_power_pulse_ms);
     RUN_TEST(test_get_boot_timeout_ms);
     RUN_TEST(test_get_device_name);
+    RUN_TEST(test_get_device_mode_default);
     RUN_TEST(test_get_unknown_key);
     RUN_TEST(test_get_no_key);
 
@@ -499,6 +529,9 @@ int main(void)
     RUN_TEST(test_set_wifi_ssid_too_long);
     RUN_TEST(test_set_wifi_password_at_max_length);
     RUN_TEST(test_set_wifi_password_too_long);
+    RUN_TEST(test_set_device_mode_hid_receiver);
+    RUN_TEST(test_set_device_mode_pc_proxy);
+    RUN_TEST(test_set_device_mode_invalid);
     RUN_TEST(test_set_unknown_key);
     RUN_TEST(test_set_no_value);
     RUN_TEST(test_set_no_key);

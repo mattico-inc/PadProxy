@@ -58,6 +58,7 @@ typedef enum {
     KEY_POWER_PULSE_MS,
     KEY_BOOT_TIMEOUT_MS,
     KEY_DEVICE_NAME,
+    KEY_DEVICE_MODE,
     KEY_COUNT,
     KEY_UNKNOWN = -1,
 } config_key_t;
@@ -68,7 +69,32 @@ static const char *key_names[KEY_COUNT] = {
     [KEY_POWER_PULSE_MS]  = "power_pulse_ms",
     [KEY_BOOT_TIMEOUT_MS] = "boot_timeout_ms",
     [KEY_DEVICE_NAME]     = "device_name",
+    [KEY_DEVICE_MODE]     = "device_mode",
 };
+
+/* ── device_mode <-> string ──────────────────────────────────────────── */
+
+static const char *device_mode_name(uint8_t mode)
+{
+    switch (mode) {
+    case DEVICE_MODE_HID_RECEIVER: return "hid_receiver";
+    case DEVICE_MODE_PC_PROXY:
+    default:                       return "pc_proxy";
+    }
+}
+
+static bool device_mode_from_name(const char *name, uint8_t *out)
+{
+    if (strcmp(name, "pc_proxy") == 0) {
+        *out = DEVICE_MODE_PC_PROXY;
+        return true;
+    }
+    if (strcmp(name, "hid_receiver") == 0) {
+        *out = DEVICE_MODE_HID_RECEIVER;
+        return true;
+    }
+    return false;
+}
 
 static config_key_t find_key(const char *name)
 {
@@ -95,6 +121,8 @@ static int cmd_get(config_key_t key, const device_config_t *cfg,
         return out_printf(out, size, "OK %u\n", cfg->boot_timeout_ms);
     case KEY_DEVICE_NAME:
         return out_printf(out, size, "OK %s\n", cfg->device_name);
+    case KEY_DEVICE_MODE:
+        return out_printf(out, size, "OK %s\n", device_mode_name(cfg->device_mode));
     default:
         return out_printf(out, size, "ERR unknown key\n");
     }
@@ -154,6 +182,15 @@ static int cmd_set(config_key_t key, const char *value,
         cfg->device_name[DEVICE_CONFIG_DEVICE_NAME_MAX] = '\0';
         return out_printf(out, size, "OK\n");
 
+    case KEY_DEVICE_MODE: {
+        uint8_t mode;
+        if (!device_mode_from_name(value, &mode))
+            return out_printf(out, size,
+                              "ERR invalid value (pc_proxy|hid_receiver)\n");
+        cfg->device_mode = mode;
+        return out_printf(out, size, "OK\n");
+    }
+
     default:
         return out_printf(out, size, "ERR unknown key\n");
     }
@@ -184,6 +221,10 @@ static int cmd_list(const device_config_t *cfg, char *out, size_t size)
 
     n = out_printf(out + total, size - total,
                    "OK device_name=%s\n", cfg->device_name);
+    total += n;
+
+    n = out_printf(out + total, size - total,
+                   "OK device_mode=%s\n", device_mode_name(cfg->device_mode));
     total += n;
 
     return total;

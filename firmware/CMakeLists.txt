@@ -52,6 +52,8 @@ add_executable(padproxy
     src/main.c
     src/bt_gamepad.c
     src/bt_gamepad_convert.c
+    src/bt_mouse_convert.c
+    src/bt_keyboard_convert.c
     src/usb_hid_gamepad.c
     src/usb_hid_report.c
     src/pc_power_state.c
@@ -59,6 +61,7 @@ add_executable(padproxy
     src/ota_version.c
     src/ota_update.c
     src/device_config.c
+    src/device_config_flash.c
     src/setup_cmd.c
     src/ir_protocol.c
     src/ir_blaster.c
@@ -110,6 +113,8 @@ target_compile_definitions(padproxy PRIVATE
 target_link_libraries(padproxy
     pico_stdlib
     pico_sync
+    hardware_flash
+    hardware_watchdog
     tinyusb_device
     pico_btstack_classic
     pico_btstack_cyw43

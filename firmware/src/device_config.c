@@ -4,7 +4,7 @@
 /* ── Wire format ────────────────────────────────────────────────────── */
 
 #define CONFIG_MAGIC   0x50434647  /* "PCFG" */
-#define CONFIG_VERSION 2
+#define CONFIG_VERSION 3  /* v2 adds IR/MQTT/WiFi-BT, v3 adds device_mode */
 
 /*
  * Binary layout (fixed size):
@@ -33,7 +33,8 @@
     2 + /* mqtt_port */                              \
     (DEVICE_CONFIG_MQTT_USERNAME_MAX + 1) +          \
     (DEVICE_CONFIG_MQTT_PASSWORD_MAX + 1) +          \
-    1   /* wifi_bt_priority */                       \
+    1 + /* wifi_bt_priority */                       \
+    1   /* device_mode */                              \
 )
 #define TOTAL_SIZE (HEADER_SIZE + PAYLOAD_SIZE + CRC_SIZE)
 
@@ -105,6 +106,7 @@ void device_config_init(device_config_t *cfg)
 
     /* WiFi/BT coexistence */
     cfg->wifi_bt_priority = 0;
+    cfg->device_mode = DEVICE_CONFIG_DEFAULT_DEVICE_MODE;
 }
 
 bool device_config_validate(const device_config_t *cfg)
@@ -120,6 +122,10 @@ bool device_config_validate(const device_config_t *cfg)
         return false;
 
     if (cfg->device_name[0] == '\0')
+        return false;
+
+    if (cfg->device_mode != DEVICE_MODE_PC_PROXY &&
+        cfg->device_mode != DEVICE_MODE_HID_RECEIVER)
         return false;
 
     /* Ensure strings are null-terminated within bounds */
@@ -189,6 +195,7 @@ int device_config_serialize(const device_config_t *cfg,
 
     /* WiFi/BT coexistence (v2) */
     *p++ = cfg->wifi_bt_priority;
+    *p++ = cfg->device_mode;
 
     /* CRC over header + payload */
     uint32_t crc = crc32_update(0, buf, HEADER_SIZE + PAYLOAD_SIZE);
@@ -256,6 +263,7 @@ bool device_config_deserialize(device_config_t *cfg,
 
     /* WiFi/BT coexistence (v2) */
     tmp.wifi_bt_priority = *p++;
+    tmp.device_mode = *p++;
 
     if (!device_config_validate(&tmp))
         return false;

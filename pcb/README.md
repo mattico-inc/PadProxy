@@ -18,6 +18,7 @@ The Pico 2 W USB data lines connect directly to USB Port 1 for optimal HID laten
 ### Power Management
 - USB standby power (5VSB) support - stays powered when PC is off
 - Optional 5VSB tap header for motherboards without USB standby
+- Active power mux (TPS2116) selects between sources with backfeed blocking, replacing the earlier passive diode-OR
 - Pico 2 W has an onboard 3.3V buck-boost regulator (no external LDO needed)
 
 ### Front Panel Interface (4-Wire Cable)
@@ -65,20 +66,16 @@ The Pico 2 W USB data lines connect directly to USB Port 1 for optimal HID laten
 - `PadProxy.kicad_pro` - KiCad project file
 - `PadProxy.kicad_sch` - Schematic
 - `PadProxy.kicad_pcb` - PCB layout
-- `gerbers/` - Manufacturing files
-- `bom/` - Bill of materials
+
+Gerbers and a bill of materials are not yet generated/exported from this project.
 
 ## Manufacturing
 
-Gerber files are provided for PCB fabrication. The design is optimized for:
+The design is optimized for:
 - 2-layer PCB
 - Standard 1.6mm thickness
 - HASL or ENIG finish
 - 90Ω differential impedance for USB traces
-
-## Assembly
-
-See `bom/` for component list and placement files for automated assembly.
 
 ## Design Documentation
 

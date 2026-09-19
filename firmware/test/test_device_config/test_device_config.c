@@ -46,6 +46,12 @@ void test_defaults_are_valid(void)
     TEST_ASSERT_TRUE(device_config_validate(&cfg));
 }
 
+void test_defaults_device_mode(void)
+{
+    TEST_ASSERT_EQUAL_UINT8(DEVICE_CONFIG_DEFAULT_DEVICE_MODE, cfg.device_mode);
+    TEST_ASSERT_EQUAL_UINT8(DEVICE_MODE_PC_PROXY, cfg.device_mode);
+}
+
 /* ── Validation ──────────────────────────────────────────────────────── */
 
 void test_validate_null(void)
@@ -107,6 +113,24 @@ void test_validate_empty_device_name(void)
     TEST_ASSERT_FALSE(device_config_validate(&cfg));
 }
 
+void test_validate_device_mode_pc_proxy(void)
+{
+    cfg.device_mode = DEVICE_MODE_PC_PROXY;
+    TEST_ASSERT_TRUE(device_config_validate(&cfg));
+}
+
+void test_validate_device_mode_hid_receiver(void)
+{
+    cfg.device_mode = DEVICE_MODE_HID_RECEIVER;
+    TEST_ASSERT_TRUE(device_config_validate(&cfg));
+}
+
+void test_validate_device_mode_invalid(void)
+{
+    cfg.device_mode = 2;
+    TEST_ASSERT_FALSE(device_config_validate(&cfg));
+}
+
 /* ── Serialization roundtrip ─────────────────────────────────────────── */
 
 void test_serialize_returns_positive_length(void)
@@ -165,6 +189,30 @@ void test_roundtrip_custom_values(void)
     TEST_ASSERT_EQUAL_UINT16(500, loaded.power_pulse_ms);
     TEST_ASSERT_EQUAL_UINT16(10000, loaded.boot_timeout_ms);
     TEST_ASSERT_EQUAL_STRING("MyPad", loaded.device_name);
+}
+
+void test_roundtrip_device_mode_hid_receiver(void)
+{
+    cfg.device_mode = DEVICE_MODE_HID_RECEIVER;
+
+    int n = device_config_serialize(&cfg, buf, sizeof(buf));
+    TEST_ASSERT_TRUE(n > 0);
+
+    device_config_t loaded;
+    TEST_ASSERT_TRUE(device_config_deserialize(&loaded, buf, (size_t)n));
+    TEST_ASSERT_EQUAL_UINT8(DEVICE_MODE_HID_RECEIVER, loaded.device_mode);
+}
+
+void test_roundtrip_device_mode_pc_proxy(void)
+{
+    cfg.device_mode = DEVICE_MODE_PC_PROXY;
+
+    int n = device_config_serialize(&cfg, buf, sizeof(buf));
+    TEST_ASSERT_TRUE(n > 0);
+
+    device_config_t loaded;
+    TEST_ASSERT_TRUE(device_config_deserialize(&loaded, buf, (size_t)n));
+    TEST_ASSERT_EQUAL_UINT8(DEVICE_MODE_PC_PROXY, loaded.device_mode);
 }
 
 void test_roundtrip_max_length_strings(void)
@@ -290,6 +338,7 @@ int main(void)
     RUN_TEST(test_defaults_device_name);
     RUN_TEST(test_defaults_wifi_empty);
     RUN_TEST(test_defaults_are_valid);
+    RUN_TEST(test_defaults_device_mode);
 
     /* Validation */
     RUN_TEST(test_validate_null);
@@ -302,12 +351,17 @@ int main(void)
     RUN_TEST(test_validate_boot_timeout_at_min);
     RUN_TEST(test_validate_boot_timeout_at_max);
     RUN_TEST(test_validate_empty_device_name);
+    RUN_TEST(test_validate_device_mode_pc_proxy);
+    RUN_TEST(test_validate_device_mode_hid_receiver);
+    RUN_TEST(test_validate_device_mode_invalid);
 
     /* Serialization roundtrip */
     RUN_TEST(test_serialize_returns_positive_length);
     RUN_TEST(test_roundtrip_defaults);
     RUN_TEST(test_roundtrip_with_wifi);
     RUN_TEST(test_roundtrip_custom_values);
+    RUN_TEST(test_roundtrip_device_mode_hid_receiver);
+    RUN_TEST(test_roundtrip_device_mode_pc_proxy);
     RUN_TEST(test_roundtrip_max_length_strings);
 
     /* Deserialization failures */

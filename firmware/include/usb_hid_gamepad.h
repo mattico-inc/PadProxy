@@ -3,12 +3,14 @@
 
 #include <stdbool.h>
 #include "gamepad.h"
+#include "usb_hid_report.h"
 
 /**
- * USB HID Gamepad Device
+ * USB HID Composite Device
  *
- * Presents the Pico 2 W as a USB HID gamepad to the host PC using TinyUSB.
- * The native USB peripheral connects directly to one port on the
+ * Presents the Pico 2 W as a USB composite HID device (gamepad + mouse +
+ * keyboard, alongside a CDC setup serial interface) to the host PC using
+ * TinyUSB. The native USB peripheral connects directly to one port on the
  * motherboard's internal USB header for low-latency input.
  *
  * USB state transitions feed into the PC power state machine:
@@ -54,6 +56,22 @@ void usb_hid_gamepad_task(void);
  * @return true if the report was queued, false if dropped.
  */
 bool usb_hid_gamepad_send_report(const gamepad_report_t *report);
+
+/**
+ * Send a mouse report to the host PC on the mouse HID interface.
+ *
+ * @param report  Mouse state in USB wire format.
+ * @return true if the report was queued, false if dropped.
+ */
+bool usb_hid_mouse_send_report(const usb_mouse_report_t *report);
+
+/**
+ * Send a keyboard report to the host PC on the keyboard HID interface.
+ *
+ * @param report  Keyboard state in USB wire format.
+ * @return true if the report was queued, false if dropped.
+ */
+bool usb_hid_keyboard_send_report(const usb_keyboard_report_t *report);
 
 /**
  * Get the current USB connection state.

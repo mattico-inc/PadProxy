@@ -13,6 +13,7 @@ This document captures the hardware design decisions for PadProxy's power manage
 7. [Connector Specifications](#connector-specifications)
 8. [Component Selection](#component-selection)
 9. [GPIO Assignments](#gpio-assignments)
+10. [Design Considerations](#design-considerations)
 
 ---
 
@@ -34,9 +35,9 @@ PadProxy supports multiple power input options for maximum compatibility:
 
 | Source | Available When PC Off? | Connector | Notes |
 |--------|------------------------|-----------|-------|
-| USB Standby Power (5VSB) | Yes (if BIOS enabled) | USB 2.0 Header | Primary source |
-| Direct 5VSB Tap | Yes (always) | 2-pin header | Backup option |
-| USB-C (external) | Depends on port | USB-C receptacle | Dev/alt mounting |
+| USB Standby Power (5VSB) | Yes (if BIOS enabled) | USB 2.0 Header | Primary source — power mux IN1 (priority) |
+| Direct 5VSB Tap | Yes (always) | 2-pin header | Backup source — power mux IN2 |
+| USB-C (external) | Depends on port | USB-C receptacle | Dev/alt mounting — feeds Pico 2 W directly, not muxed |
 
 ### Power Budget
 
@@ -56,15 +57,61 @@ USB standby power typically provides 500mA-2A depending on motherboard, which is
                          ┌─────────────────────────────────┐
                          │         Power Management        │
                          │                                 │
-USB 2.0 Header ─── 5V ──►│──┬──► VSYS ──► Pico 2 W        │
-(Primary)                │  │    (onboard 3.3V regulator)  │
-                         │  │                              │
-5VSB Tap (Optional) ────►│──┘ (diode OR)                   │
-                         │                                 │
+USB 2.0 Header ─── 5V ──►│─ IN1 ─┐                          │
+(Primary, mux IN1)       │       ├─► TPS2116 ─► VSYS ──► Pico 2 W
+                         │       │  (active mux)  (onboard 3.3V regulator)
+5VSB Tap (Optional) ────►│─ IN2 ─┘                          │
+(Backup, mux IN2)        │                                 │
                          └─────────────────────────────────┘
 ```
 
-**Note:** Simple diode OR configuration allows either source to power the device. When both present, higher voltage source wins (minimal difference in practice). The Pico 2 W has an onboard buck-boost regulator (RT6154) that generates 3.3V from VSYS, so no external LDO is needed.
+**Note:** An active power mux (TPS2116) replaces the previous passive diode-OR — see
+[Active Power Mux](#active-power-mux) below. The Pico 2 W has an onboard buck-boost
+regulator (RT6154) that generates 3.3V from VSYS, so no external LDO is needed.
+
+### Active Power Mux
+
+v1 uses an **active power mux IC — TPS2116** (Texas Instruments) or equivalent small
+2:1 power mux — in place of the passive diode-OR. This is the same part recommended in
+[pcb-v2-design.md](pcb-v2-design.md)'s "Dual-Port Power Management" section for the v2
+redesign, but retrofitted here onto the **existing Pico 2 W module carrier board**, not
+the custom board: v2's version assumes a custom RP2350B board with two USB-C ports
+(`USB_NATIVE`/`USB_PWR`), whereas this addendum keeps the Pico 2 W module and its
+current connector set (USB 2.0 9-pin header + USB-C + 5VSB tap header) — no RP2350B
+migration.
+
+**Connections:**
+- **IN1 (priority):** USB standby power from the USB 2.0 9-pin header (`USB_IN`, 5V
+  pin) — primary source, since it tracks PC power state directly (a rising edge signals
+  PC power-on) and is the connector engaged in normal internal-install use.
+- **IN2 (backup):** the optional 5VSB tap header (`5VSB_IN`) — used on motherboards
+  that don't expose 5VSB on the USB header.
+- **OUT → VSYS:** feeds the Pico 2 W module's onboard buck-boost, unchanged.
+- The discrete `USB_C` receptacle (Mode C, dev/fallback) is **not** wired into the
+  mux — it connects to the Pico 2 W's own USB port directly, as today, since it's a
+  mutually exclusive alternate connection mode rather than a concurrent power source.
+
+**Priority & backfeed blocking:** SEL is fixed to prefer IN1; the TPS2116 switches to
+IN2 automatically if IN1 drops below ~4.5V, with no glitch on VSYS. Critically, it
+blocks reverse current on the non-selected input — if a 5VSB tap cable is left
+connected to a powered source while the 9-pin header is plugged into a different,
+unpowered or unrelated host, the mux prevents that tap voltage from backfeeding through
+the header into the host's USB port. This matters more now that PadProxy is routinely
+unplugged and moved between systems rather than staying wired into one PC, where
+connector combinations are less predictable than a single fixed install.
+
+**VBUS sense:** route both mux inputs to Pico 2 W ADC-capable GPIOs through the same
+100kΩ/47kΩ divider used in pcb-v2-design.md (5V → ~1.6V, safely under the 3.3V ADC
+range). The Pico 2 W module exposes ADC0–ADC2 only on GPIO26–28 (fewer ADC options than
+the bare RP2350B assumed in v2). None of GPIO26–28 are used elsewhere on this board
+(existing assignments are GPIO2/3/4 — see [GPIO Assignments](#gpio-assignments)), so:
+
+| GPIO | Signal | Notes |
+|------|--------|-------|
+| 26 (ADC0) | USB_IN_VBUS_SENSE | 9-pin header (mux IN1) divider |
+| 27 (ADC1) | TAP_VBUS_SENSE | 5VSB tap header (mux IN2) divider |
+
+GPIO28 (ADC2) remains free for future use.
 
 ---
 
@@ -149,6 +196,18 @@ the motherboard pulls high.
 The **power LED sense** circuit requires correct polarity: the user connects
 PWR_LED+ and PWR_LED- per silkscreen markings. Reverse connection causes no damage
 (the PC817 LED is simply reverse-biased within its rated voltage) but disables sensing.
+
+### Voltage Compatibility
+
+Most ATX motherboards pull PWR_BTN to **5V** (from the 5VSB standby rail via the
+SuperIO/EC chip); some use **3.3V**. The **RP2350 is NOT 5V tolerant** (absolute max
+3.63V), so both front panel circuits use optocoupler isolation with no direct
+electrical connection to the motherboard:
+
+- **Button trigger (photo-MOSFET):** load side is fully isolated from the Pico 2 W;
+  works at any voltage up to the TLP222A's 60V rating.
+- **LED sense (PC817):** handles both 3.3V and 5V (~4.5mA and ~8.1mA through the
+  LED respectively, both within spec), with full optical isolation.
 
 ### Power Button Trigger Circuit (Polarity-Agnostic)
 
@@ -235,10 +294,6 @@ PC817 Output (phototransistor):
 **Polarity:** User must connect PWR_LED+ and PWR_LED- correctly per silkscreen.
 Reverse connection causes no damage (PC817 LED is reverse-biased, max reverse
 voltage rating 6V) but disables sensing.
-
-**Advantage over previous Zener clamp design:** Full optical isolation eliminates
-any ground reference dependency between PadProxy and the motherboard. Inherently
-5V tolerant without a Zener diode, since the optocoupler provides galvanic separation.
 
 ---
 
@@ -435,6 +490,7 @@ Standard ATX front panel header:
 | Component | Part Number | Package | Purpose | Est. Cost |
 |-----------|-------------|---------|---------|-----------|
 | MCU | Raspberry Pi Pico 2 W | Module | Main controller (RP2350 + CYW43439 BT/WiFi) | $7.00 |
+| Active Power Mux | TPS2116 (or equivalent) | SOT-23-6 | Priority power source selection + backfeed blocking (replaces diode-OR) | $0.50 |
 | Photo-MOSFET Optocoupler | TLP222A (or AQY212 / CPC1017N) | DIP-4/SOP-4 | Power button trigger (polarity-agnostic) | $0.60 |
 | Optocoupler (sense) | PC817 | DIP-4/SMD | Power LED sense (optically isolated) | $0.10 |
 | Addressable LED | WS2812B or SK6812 | 5050 | Status indicator (single-wire protocol) | $0.05 |
@@ -465,6 +521,15 @@ Standard ATX front panel header:
 | Resistor | 1kΩ | 1 | Base current limit for NPN transistor |
 | Resistor | 22Ω | 1 | IR LED current limit (~100mA peak at 3.3V) |
 
+### Active Power Mux Components
+
+| Component | Value | Qty | Purpose |
+|-----------|-------|-----|---------|
+| Active power mux IC | TPS2116 | 1 | Priority-based source selection with backfeed blocking (replaces diode-OR) |
+| Resistor | 100kΩ | 2 | VBUS sense divider, top (one per input) |
+| Resistor | 47kΩ | 2 | VBUS sense divider, bottom (one per input) |
+| TVS diode | e.g. PESD5V0S1BA | 2 | Optional: surge/ESD protection on mux VBUS inputs (see [ESD Protection](#esd-protection)) |
+
 ### Connectors
 
 | Component | Part Number | Purpose | Est. Cost |
@@ -487,11 +552,16 @@ own front panel wires.
 
 | Category | Cost | Notes |
 |----------|------|-------|
-| Active components | ~$7.90 | MCU, optocouplers, LED, IR LED, NPN transistor |
-| Passive components | ~$0.17 | Resistors (5× total) |
+| Active components | ~$8.40 | MCU, optocouplers, LED, IR LED, NPN transistor, TPS2116 active power mux |
+| Passive components | ~$0.21 | Resistors, incl. IR driver and VBUS sense dividers |
 | Connectors | ~$0.90 | USB header, USB-C, 4-pin header |
 | PCB (qty 5) | ~$2.00 each | |
-| **Total per unit** | **~$10.97** | |
+| **Total per unit** | **~$11.51** | |
+
+**Delta vs. diode-OR:** adds one TPS2116 (~$0.50) and four sense-divider resistors
+(~$0.04) for VBUS monitoring; removes the (previously uncosted, board-level) Schottky
+diodes used for the passive OR. Net BOM impact is roughly +$0.54/unit for priority
+selection, backfeed blocking, and VBUS source visibility.
 
 ---
 
@@ -505,6 +575,8 @@ own front panel wires.
 | 3 | PWR_LED_SENSE | Input | PC817 output (active LOW = PC on, pull-up) |
 | 4 | STATUS_LED | Output | WS2812B addressable LED data line |
 | 5 | IR_BLASTER | Output | NPN transistor → IR LED (38 kHz carrier) |
+| 26 (ADC0) | USB_IN_VBUS_SENSE | Input (analog) | Power mux IN1 sense, via 100kΩ/47kΩ divider |
+| 27 (ADC1) | TAP_VBUS_SENSE | Input (analog) | Power mux IN2 sense, via 100kΩ/47kΩ divider |
 
 **USB:** Handled by the Pico 2 W module internally. USB D+/D- are routed from the
 module's castellated pads (or test points TP1/TP3) to the carrier PCB.
@@ -519,6 +591,8 @@ the onboard PCB antenna — no external antenna connector needed.
 3. **GPIO 4** - WS2812B addressable LED data
 4. **GPIO 5** - IR blaster output (NPN transistor driver)
 5. **Avoid GPIO 0, 1** - Reserved for UART TX/RX (debug output)
+6. **GPIO 26-28 (ADC0-2)** - The only ADC-capable GPIOs the Pico 2 W module exposes;
+   26 and 27 are used for VBUS sense (unused elsewhere on this board), leaving 28 free
 
 ---
 
@@ -542,6 +616,13 @@ the onboard PCB antenna — no external antenna connector needed.
 - TVS diode on 5V input recommended
 - All front panel connections through optocouplers provide full galvanic isolation
 
+Since PadProxy now moves between hosts (laptops, docks, other PCs) more often than a
+one-time internal install, hot-plug robustness matters more than it used to. Recommend
+a small TVS diode (e.g. PESD5V0S1BA) on each active-power-mux VBUS input, in addition to
+the existing USBLC6-2 on data lines. Inrush current on repeated plug/unplug cycles
+should also be kept modest — the TPS2116's internal current limiting helps here, and a
+small bulk capacitor at each mux input is worth budgeting board area for.
+
 ### Mechanical
 
 - PCB sized for internal mounting
@@ -550,99 +631,7 @@ the onboard PCB antenna — no external antenna connector needed.
 
 ---
 
-## Design Decisions (Resolved)
-
-### D1: Power LED Sense (RESOLVED → REVISED v0.5)
-
-**Decision: Use PC817 optocoupler for full optical isolation.** Both PWR_LED+ and
-PWR_LED- are brought to PadProxy via the 4-wire cable. The optocoupler provides
-galvanic separation and inherent 5V tolerance without a Zener diode. User connects
-+/- correctly per silkscreen. Reverse connection causes no damage but disables sensing.
-
-*Previous (v0.3): Zener clamp with resistive sense. Changed because the 4-wire
-connection eliminates shared ground, making a direct resistive sense impossible.*
-
-### D2: Reset Button Trigger (RESOLVED → REMOVED v0.5)
-
-**Decision: Removed entirely.** Not worth the complexity and extra wires. Long-press
-power button handles forced shutdown. The 4-wire cable design has no passthrough, so
-there is no natural place to intercept the reset signal.
-
-*Previous (v0.3): Optional DNP footprint with TLP222A. Removed to simplify the
-4-wire external connector design.*
-
-### D3: Front Panel Connector Format (RESOLVED → REVISED v0.5)
-
-**Decision: Single 4-pin connector** (JST-XH or 2.54mm header) on the PadProxy PCB.
-The cable terminates in individual DuPont-style 2-pin connectors on the motherboard
-end, plugging into the standard front panel header alongside the case's own wires.
-
-*Previous (v0.3): Dual-footprint per signal (header + screw terminal) for 8+ wires.
-Simplified to 4-wire cable with single connector.*
-
-### D4: Voltage Compatibility (RESOLVED)
-
-**Research findings:** Most ATX motherboards pull PWR_BTN to **5V** (from the 5VSB
-standby rail via the SuperIO/EC chip). Some use **3.3V**. No evidence of voltages
-below 3.3V on standard ATX boards. Some industrial boards (e.g., ASRock IMB-140D)
-offer jumper selection between 3.3V and 5V.
-
-**Impact on design:**
-- **Button trigger circuit (photo-MOSFET):** Load side is completely isolated from
-  the Pico 2 W. Works at any voltage up to the TLP222A's 60V rating.
-- **LED sense circuit (optocoupler):** PC817 input handles both 3.3V and 5V.
-  At 3.3V: ~4.5mA through LED (reliable). At 5V: ~8.1mA (well within limits).
-  Full optical isolation, so motherboard voltage never reaches PadProxy.
-- **RP2350 is NOT 5V tolerant** (absolute max 3.63V). All GPIO connections to
-  the motherboard use optocoupler isolation — no direct electrical connection.
-
-### D5: Power Button Sense (RESOLVED v0.5)
-
-**Decision: Removed.** Physical button press detection is unnecessary. The power LED
-sense and USB enumeration/suspension signals fully cover all PC state transitions.
-The button sense circuit (Schottky bridge rectifier + PC817) only provided marginally
-faster state tracking (~ms) at the cost of 6 extra components and 2 GPIOs.
-
-### D6: OLED Display Header (RESOLVED v0.5)
-
-**Decision: Removed.** No practical use case for a display on an internal PC device.
-The WS2812B addressable LED provides sufficient status indication (multiple colors,
-patterns) using a single GPIO instead of 2 (I2C SDA/SCL).
-
-### D7: Status LED (RESOLVED v0.5)
-
-**Decision: WS2812B addressable LED.** Replaces 3 discrete LEDs + 3 resistors with
-a single integrated package. Any color, 1 GPIO (data line), ~$0.05. The WS2812B
-protocol is well-supported with simple bit-banging or PIO on RP2350.
-
-## Open Design Questions
-
-### Q1: Photo-MOSFET Part Selection
-
-Candidate parts for the trigger optocoupler(s):
-
-| Part | Ron | Max Load V | Max Load I | Package | Notes |
-|------|-----|-----------|-----------|---------|-------|
-| TLP222A | 4Ω | 60V | 500mA | DIP-4 | Common, well-documented |
-| AQY212 | 2.5Ω | 60V | 500mA | SOP-4 | Smaller package |
-| CPC1017N | 8Ω | 60V | 200mA | SOP-4 | Cheapest, adequate |
-
-All are massively overspec for a button signal (~3.3-5V, <1mA when shorted). The
-choice is mainly about availability and package preference. Defaulting to TLP222A
-for now due to wide availability and DIP-4 hand-soldering friendliness.
-
----
-
-## Revision History
-
-| Version | Date | Changes |
-|---------|------|---------|
-| 0.1 | 2026-02-02 | Initial design document |
-| 0.2 | 2026-02-06 | Revised to polarity-agnostic design: photo-MOSFET optocoupler for trigger, Schottky bridge + PC817 for sense. Added open design questions. Updated BOM. |
-| 0.3 | 2026-02-07 | Added 5V tolerance protection (Zener clamp on LED sense). Added optional reset trigger circuit (DNP). Dual-footprint connectors (headers + screw terminals). Resolved design questions D1-D4. Updated BOM and GPIO table. |
-| 0.4 | 2026-02-21 | Migrated from ESP32-S3-WROOM-1 to Raspberry Pi Pico 2 W (RP2350). Removed external LDO and antenna connector. Updated GPIO assignments, power budget, BOM, and all circuit descriptions. |
-| 0.5 | 2026-02-22 | Simplified front panel interface: removed power button sense circuit (bridge rectifier + PC817), replaced LED Zener clamp with PC817 optocoupler for full optical isolation, 4-wire cable design (PWR_BTN trigger + PWR_LED sense). Removed reset trigger, OLED header. Replaced discrete RGB LEDs with WS2812B addressable LED. Reduced GPIO count from 8 to 3. Updated BOM, connector specs, design decisions D1-D7. |
-| 0.6 | 2026-03-14 | Added IR blaster circuit (GPIO 5, NPN transistor + IR LED) for TV power control. Added IR components to BOM. GPIO count now 4. See [wifi-ir-smarthome-design.md](wifi-ir-smarthome-design.md) for WiFi service, IR protocol, and smart home integration details. |
-
-**Note:** PCB v2 (custom RP2350B, separate wireless module, USB-C only, active power mux)
-is tracked in [pcb-v2-design.md](pcb-v2-design.md).
+This document reflects the current PadProxy v1 hardware design (Pico 2 W based).
+For the design's evolution, see git history. PCB v2 (custom RP2350B, separate
+wireless module, USB-C only, dual-port active power mux) is tracked in
+[pcb-v2-design.md](pcb-v2-design.md).

@@ -60,4 +60,35 @@ void usb_hid_report_from_gamepad(const gamepad_report_t *in,
 /** The HID report descriptor. */
 extern const uint8_t usb_hid_report_descriptor[USB_HID_REPORT_DESCRIPTOR_LEN];
 
+/**
+ * USB HID Mouse Report (5 bytes)
+ *
+ * Matches TinyUSB's TUD_HID_REPORT_DESC_MOUSE() template: standard
+ * boot-compatible relative mouse layout plus a vertical wheel and a
+ * horizontal pan byte (always 0; Bluepad32 mice don't report pan).
+ */
+typedef struct __attribute__((packed)) {
+    uint8_t buttons; /* bit0=left, bit1=right, bit2=middle, bit3=backward, bit4=forward */
+    int8_t  x;       /* Relative X movement, -127..127 */
+    int8_t  y;       /* Relative Y movement, -127..127 */
+    int8_t  wheel;   /* Vertical scroll delta, -127..127 */
+    int8_t  pan;     /* Horizontal scroll delta; unused, always 0 */
+} usb_mouse_report_t;
+
+/** Maximum simultaneously-reported keys in the boot-protocol keyboard report. */
+#define USB_KEYBOARD_MAX_KEYS 6
+
+/**
+ * USB HID Keyboard Report (8 bytes)
+ *
+ * Standard HID boot-protocol keyboard report: modifier byte, reserved
+ * byte, and up to 6 simultaneously pressed keys (6-key rollover).
+ * Keycodes are standard USB HID keyboard usage IDs.
+ */
+typedef struct __attribute__((packed)) {
+    uint8_t modifier;                       /* KEYBOARD_MODIFIER_* bitmask */
+    uint8_t reserved;                       /* Always 0 */
+    uint8_t keycode[USB_KEYBOARD_MAX_KEYS]; /* USB HID keyboard usage IDs */
+} usb_keyboard_report_t;
+
 #endif /* USB_HID_REPORT_H */

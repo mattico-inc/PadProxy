@@ -121,7 +121,7 @@ ARM_GDB     = $(ARM_TOOLCHAIN_BIN)/arm-none-eabi-gdb
 
 # ── Test binaries ────────────────────────────────────────────────────────
 
-TEST_BINS = $(TEST_BUILD_DIR)/test_pc_power_state $(TEST_BUILD_DIR)/test_gamepad $(TEST_BUILD_DIR)/test_ota_version $(TEST_BUILD_DIR)/test_device_config $(TEST_BUILD_DIR)/test_setup_cmd $(TEST_BUILD_DIR)/test_device_integration $(TEST_BUILD_DIR)/test_bt_gamepad_convert $(TEST_BUILD_DIR)/test_ir_protocol
+TEST_BINS = $(TEST_BUILD_DIR)/test_pc_power_state $(TEST_BUILD_DIR)/test_gamepad $(TEST_BUILD_DIR)/test_ota_version $(TEST_BUILD_DIR)/test_device_config $(TEST_BUILD_DIR)/test_setup_cmd $(TEST_BUILD_DIR)/test_device_integration $(TEST_BUILD_DIR)/test_bt_gamepad_convert $(TEST_BUILD_DIR)/test_ir_protocol $(TEST_BUILD_DIR)/test_bt_mouse_convert $(TEST_BUILD_DIR)/test_bt_keyboard_convert
 
 # ── Firmware cmake arguments ─────────────────────────────────────────────
 
@@ -250,6 +250,12 @@ $(TEST_BUILD_DIR)/test_bt_gamepad_convert: test/test_bt_gamepad_convert/test_bt_
 	$(CC) $(CFLAGS) -o $@ $^
 
 $(TEST_BUILD_DIR)/test_ir_protocol: test/test_ir_protocol/test_ir_protocol.c src/ir_protocol.c $(UNITY_SRC) | $(TEST_BUILD_DIR)
+	$(CC) $(CFLAGS) -o $@ $^
+
+$(TEST_BUILD_DIR)/test_bt_mouse_convert: test/test_bt_mouse_convert/test_bt_mouse_convert.c src/bt_mouse_convert.c $(UNITY_SRC) | $(TEST_BUILD_DIR)
+	$(CC) $(CFLAGS) -o $@ $^
+
+$(TEST_BUILD_DIR)/test_bt_keyboard_convert: test/test_bt_keyboard_convert/test_bt_keyboard_convert.c src/bt_keyboard_convert.c $(UNITY_SRC) | $(TEST_BUILD_DIR)
 	$(CC) $(CFLAGS) -o $@ $^
 
 $(TEST_BUILD_DIR):

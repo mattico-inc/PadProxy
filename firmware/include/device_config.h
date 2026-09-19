@@ -38,6 +38,24 @@
 #define DEVICE_CONFIG_BOOT_TIMEOUT_MIN  5000
 #define DEVICE_CONFIG_BOOT_TIMEOUT_MAX  60000
 
+/**
+ * Device operating mode.
+ *
+ *   DEVICE_MODE_PC_PROXY    - Wired into a PC's front panel header.
+ *                              The pc_power_sm gates HID forwarding on
+ *                              PC_STATE_ON, and the guide/home button
+ *                              wakes the PC (default, current behavior).
+ *   DEVICE_MODE_HID_RECEIVER - Pure Bluetooth-to-USB dock: no front-panel
+ *                              wiring, no PC to wake. HID reports forward
+ *                              as soon as USB is enumerated.
+ */
+typedef enum {
+    DEVICE_MODE_PC_PROXY    = 0,
+    DEVICE_MODE_HID_RECEIVER = 1,
+} device_mode_t;
+
+#define DEVICE_CONFIG_DEFAULT_DEVICE_MODE DEVICE_MODE_PC_PROXY
+
 typedef struct {
     uint32_t version; /* For future compatibility checks */
 
@@ -66,6 +84,7 @@ typedef struct {
 
     /* WiFi/BT coexistence */
     uint8_t  wifi_bt_priority;     /**< Disable WiFi during BT gameplay */
+    uint8_t  device_mode; /* device_mode_t */
 } device_config_v1_t;
 
 typedef device_config_v1_t device_config_t;

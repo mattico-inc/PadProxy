@@ -109,15 +109,16 @@ with `OK` or `ERR`.
 ```c
 /* include/device_config.h */
 typedef struct {
+    uint32_t version;         /* for future compatibility checks */
     char     wifi_ssid[33];
     char     wifi_password[64];
     uint16_t power_pulse_ms;
     uint16_t boot_timeout_ms;
     char     device_name[33];
-} device_config_t;
+} device_config_v1_t;
 
 void device_config_init(device_config_t *cfg);              /* Load defaults */
-bool device_config_serialize(const device_config_t *cfg,
+int  device_config_serialize(const device_config_t *cfg,
                              uint8_t *buf, size_t len);     /* → flash */
 bool device_config_deserialize(device_config_t *cfg,
                                const uint8_t *buf, size_t len); /* ← flash */
@@ -158,29 +159,24 @@ feeds complete lines to `setup_cmd_process()`, writes responses back via
 
 ## Flash Storage
 
-- Uses a dedicated 4 KB sector near the end of flash (before any OTA
-  partition)
+- Uses the last 4 KB sector of flash, past both OTA A/B partitions (see
+  `partition_table.json`) — OTA writes only ever touch the inactive
+  partition, so this sector can never be clobbered by an update
 - Binary format: `[magic: 4B][version: 2B][data: sizeof(device_config_t)][crc32: 4B]`
 - On boot: attempt deserialize from flash → fall back to defaults on failure
 - On `save` command: serialize config → erase sector → program sector
 
-The flash read/write happens in firmware-only code (Pico SDK
-`flash_range_erase` / `flash_range_program`). The serialize/deserialize
+`device_config_flash.c` (RP2350 HAL, not unit-tested) wraps the Pico SDK
+`flash_range_erase` / `flash_range_program` calls. The serialize/deserialize
 functions in `device_config.c` are pure logic tested on the host.
 
-## Web Serial Setup Page (future)
+## Web Serial Setup Page
 
-A static HTML/JS page (hosted on GitHub Pages) that uses the Web Serial API:
+Not yet built. The firmware-side CDC + command protocol is the foundation
+for a future static HTML/JS page (Web Serial API) that connects, runs
+`list`, presents a form, and sends `set`/`save` on submit.
 
-1. User clicks "Connect" → browser shows serial port picker
-2. Page sends `list` → displays current settings in a form
-3. User edits settings → page sends `set key value` for each
-4. User clicks "Save" → page sends `save`
-
-This is a follow-up task — the firmware-side CDC + command protocol is
-the foundation.
-
-## Test Plan
+## Test Coverage
 
 Unit tests (host-native, Unity framework):
 

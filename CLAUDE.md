@@ -78,7 +78,8 @@ The firmware follows a layered architecture with clear separation between hardwa
 | Module | Files | Purpose |
 |--------|-------|---------|
 | **Main loop** | `src/main.c` | Initialization, polling loop (~1ms period), event dispatch |
-| **Bluetooth gamepad** | `src/bt_gamepad.c`, `include/bt_gamepad.h` | Bluepad32 platform integration, BT controller pairing/input |
+| **Bluetooth gamepad** | `src/bt_gamepad.c`, `include/bt_gamepad.h` | Bluepad32 platform integration, BT controller pairing/input/disconnect |
+| **BT report conversion** | `src/bt_gamepad_convert.c`, `include/bt_gamepad_convert.h` | Bluepad32 axis/trigger scaling to canonical ranges (pure logic) |
 | **USB HID gamepad** | `src/usb_hid_gamepad.c`, `include/usb_hid_gamepad.h` | TinyUSB device, USB descriptor callbacks, report sending |
 | **USB HID report** | `src/usb_hid_report.c`, `include/usb_hid_report.h` | HID report descriptor, wire-format conversion (pure logic) |
 | **Gamepad common** | `include/gamepad.h` | Canonical `gamepad_report_t` struct, button/dpad definitions |
@@ -89,6 +90,11 @@ The firmware follows a layered architecture with clear separation between hardwa
 | **IR blaster** | `src/ir_blaster.c`, `include/ir_blaster.h` | GPIO/PIO driver for IR LED, sends encoded waveforms |
 | **Smart home** | `src/smarthome.c`, `include/smarthome.h` | Compile-time platform abstraction for smart home integration |
 | **Smart home (HASS)** | `src/smarthome_hass.c` | Home Assistant MQTT integration (optional, `-DSMARTHOME=hass`) |
+| **Device config** | `src/device_config.c`, `include/device_config.h` | Config struct, validation, serialize/deserialize with CRC-32 (pure logic) |
+| **Device config flash** | `src/device_config_flash.c`, `include/device_config_flash.h` | RP2350 flash HAL: persists config to the reserved sector past the A/B partitions |
+| **Setup command processor** | `src/setup_cmd.c`, `include/setup_cmd.h` | Parses CDC serial setup commands (get/set/save/reboot/etc.), pure logic |
+| **OTA update** | `src/ota_update.c`, `include/ota_update.h` | GitHub Releases-based OTA over WiFi using RP2350 TBYB A/B partitions |
+| **OTA version** | `src/ota_version.c`, `include/ota_version.h` | Semantic version compare for OTA update decisions |
 | **TinyUSB config** | `src/tusb_config.h` | USB device class configuration (HID only) |
 
 ### Data Flow
@@ -156,8 +162,18 @@ firmware/test/
 │   └── unity_internals.h
 ├── test_pc_power_state/
 │   └── test_pc_power_state.c       # Power state machine tests
-└── test_gamepad/
-    └── test_gamepad.c              # Gamepad report/HID conversion tests
+├── test_gamepad/
+│   └── test_gamepad.c              # Gamepad report/HID conversion tests
+├── test_bt_gamepad_convert/
+│   └── test_bt_gamepad_convert.c   # Bluepad32 axis/trigger scaling tests
+├── test_device_config/
+│   └── test_device_config.c        # Config validation, serialize/deserialize tests
+├── test_setup_cmd/
+│   └── test_setup_cmd.c            # CDC setup command parsing tests
+├── test_ota_version/
+│   └── test_ota_version.c          # Semantic version comparison tests
+└── test_device_integration/
+    └── test_device_integration.c   # Full-stack integration tests across modules
 ```
 
 ### Test Conventions
@@ -180,14 +196,15 @@ firmware/test/
 - **BT Library:** Bluepad32 (supports Xbox, PlayStation, Switch Pro, 8BitDo, generic HID gamepads)
 - **USB Stack:** TinyUSB (bundled with Pico SDK), device mode only (HID gamepad)
 - **USB IDs:** VID 0x1209 (pid.codes shared), PID 0x0001 (placeholder)
-- **GPIO:** PWR_BTN_TRIGGER (GPIO 2), PWR_LED_SENSE (GPIO 3), STATUS_LED (GPIO 4)
+- **GPIO:** PWR_BTN_TRIGGER (GPIO 2), PWR_LED_SENSE (GPIO 3), STATUS_LED (GPIO 4, planned — not yet driven by firmware)
 - **UART:** printf output goes to UART (USB is occupied by HID device)
 
 ## Key Dependencies
 
 | Dependency | Source | Purpose |
 |------------|--------|---------|
-| [Pico SDK](https://github.com/raspberrypi/pico-sdk) 2.0+ | External / FetchContent | RP2350 HAL, stdlib, USB |
-| [Bluepad32](https://gitlab.com/ricardoquesada/bluepad32) | Clone to `firmware/lib/bluepad32` | Bluetooth gamepad support |
+| [Pico SDK](https://github.com/raspberrypi/pico-sdk) 2.1.0 | Clone to `firmware/lib/pico-sdk` (via `make deps`) | RP2350 HAL, stdlib, USB, flash, watchdog |
+| [Bluepad32](https://gitlab.com/ricardoquesada/bluepad32) 4.2.0 | Clone to `firmware/lib/bluepad32` (via `make deps`) | Bluetooth gamepad support |
 | [TinyUSB](https://github.com/hathach/tinyusb) | Bundled with Pico SDK | USB HID device stack |
+| lwIP + Mbed TLS | Bundled with Pico SDK (`pico_lwip_*`, `pico_mbedtls`) | HTTPS client for GitHub Releases OTA checks |
 | [Unity](https://github.com/ThrowTheSwitch/Unity) | Vendored in `firmware/test/unity/` | Unit test framework |
