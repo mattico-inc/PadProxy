@@ -142,10 +142,6 @@ bool device_config_validate(const device_config_t *cfg)
     if (cfg->mqtt_password[DEVICE_CONFIG_MQTT_PASSWORD_MAX] != '\0')
         return false;
 
-    /* MQTT port range (0 means disabled) */
-    if (cfg->mqtt_port > 0 && cfg->mqtt_port < 1)
-        return false;
-
     return true;
 }
 
